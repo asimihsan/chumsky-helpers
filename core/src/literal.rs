@@ -179,6 +179,25 @@ mod tests {
     }
 
     #[test]
+    fn test_single_quoted_literal_disallowed_explicit() {
+        // Create a parser with single-quoted strings disabled.
+        let parser = LiteralParserBuilder::new().single_quote(false).build();
+        let input = "'example'";
+        // We expect the parser to return an error variant for single-quoted literals.
+        match parser.parse(input) {
+            Ok(Expr::Error(Spanned(msg, span))) => {
+                assert_eq!(msg, "single-quoted string literals are not allowed");
+                // Optionally, verify that the span covers the input.
+                assert_eq!(span, 0..input.len());
+            }
+            other => panic!(
+                "Expected Expr::Error for a disallowed single-quoted literal, got {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
     fn test_raw_string_literal_allowed() {
         let parser = LiteralParserBuilder::new().raw_string(true).build();
         let input = "`raw \\n string`";
@@ -195,6 +214,25 @@ mod tests {
                 assert_eq!(msg, "raw string literals are not allowed");
             }
             _ => panic!("Expected Expr::Error"),
+        }
+    }
+
+    #[test]
+    fn test_raw_string_literal_disallowed_explicit() {
+        // Create a parser with raw strings disabled.
+        let parser = LiteralParserBuilder::new().raw_string(false).build();
+        let input = "`some raw string`";
+        // We expect the parser to return an error variant for raw strings.
+        match parser.parse(input) {
+            Ok(Expr::Error(Spanned(msg, span))) => {
+                assert_eq!(msg, "raw string literals are not allowed");
+                // Optionally, verify that the span covers the input (or a part of it)
+                assert_eq!(span, 0..input.len());
+            }
+            other => panic!(
+                "Expected Expr::Error for a disallowed raw string literal, got {:?}",
+                other
+            ),
         }
     }
 
@@ -251,6 +289,24 @@ mod tests {
                 }
             }
             Ok(_) => panic!("Expected an error for an unclosed double-quoted string"),
+        }
+    }
+
+    #[test]
+    fn test_unclosed_double_quote_error_message() {
+        // Create a parser with the default configuration.
+        let parser = LiteralParserBuilder::new().build();
+        // Supply an input with an unclosed double quote.
+        let input = r#""unclosed"#;
+        // Parse and expect an error.
+        let err = parser.parse(input).unwrap_err();
+
+        // The parser returns a vector of errors. Check the first one.
+        match err[0].reason() {
+            chumsky::error::SimpleReason::Custom(msg) => {
+                assert_eq!(msg, "Unclosed double quote");
+            }
+            other => panic!("Expected a custom error reason, got {:?}", other),
         }
     }
 
