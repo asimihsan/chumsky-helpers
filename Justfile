@@ -15,6 +15,8 @@ setup:
     devbox install
     devbox run mise trust
     devbox run mise install
+    rustup toolchain install nightly
+    rustup component add llvm-tools-preview --toolchain nightly-aarch64-apple-darwin
     rustup component add rustfmt
     rustup component add clippy
     cargo binstall cargo-nextest --secure --no-confirm
@@ -25,6 +27,7 @@ mac-setup:
     brew install libiconv llvm
     cargo install cargo-llvm-cov
     rustup component add llvm-tools-preview
+    rustup component add llvm-tools-preview --toolchain nightly-aarch64-apple-darwin
     xcode-select --install
     sudo xcode-select --switch /Library/Developer/CommandLineTools
 
@@ -74,7 +77,10 @@ check: rust-check rust-fmt rust-clippy rust-audit copyright-check
 test: rust-test
 
 cov:
-    cargo llvm-cov
+    cargo llvm-cov nextest
+
+cov-local:
+    cargo +nightly llvm-cov nextest --no-fail-fast --text --show-missing-lines --mcdc
 
 build: rust-build
 

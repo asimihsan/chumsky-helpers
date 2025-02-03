@@ -131,6 +131,7 @@ impl LiteralParserBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chumsky::error::SimpleReason;
     use chumsky::Parser;
     use proptest::prelude::*;
 
@@ -195,6 +196,100 @@ mod tests {
             }
             _ => panic!("Expected Expr::Error"),
         }
+    }
+
+    #[test]
+    fn test_empty_double_quoted_literal() {
+        let parser = LiteralParserBuilder::new().build();
+        // An empty double-quoted literal: ""
+        let input = r#""""#;
+        // The span covers both double quotes (0..2)
+        let expected = Expr::LiteralStr(Spanned("".to_string(), 0..2));
+        assert_eq!(parser.parse(input), Ok(expected));
+    }
+
+    #[test]
+    fn test_empty_single_quoted_literal_allowed() {
+        let parser = LiteralParserBuilder::new().single_quote(true).build();
+        // An empty single-quoted literal: ''
+        let input = "''";
+        // The span covers both single quotes (0..2)
+        let expected = Expr::LiteralStr(Spanned("".to_string(), 0..2));
+        assert_eq!(parser.parse(input), Ok(expected));
+    }
+
+    #[test]
+    fn test_empty_raw_string_literal_allowed() {
+        let parser = LiteralParserBuilder::new().raw_string(true).build();
+        // An empty raw string literal: ``
+        let input = "``";
+        // The span covers both backticks (0..2)
+        let expected = Expr::LiteralStr(Spanned("".to_string(), 0..2));
+        assert_eq!(parser.parse(input), Ok(expected));
+    }
+
+    #[test]
+    fn test_error_unclosed_double_quoted() {
+        let parser = LiteralParserBuilder::new().build();
+        // Input with an unclosed double quote
+        let input = r#""unclosed"#;
+        match parser.parse(input) {
+            Err(errs) => {
+                // We expect one error, and its reason should match our expected message.
+                let first_err = &errs[0];
+                match first_err.reason() {
+                    // We expect a custom error message.
+                    SimpleReason::Custom(msg) => {
+                        assert!(
+                            msg.contains("Unclosed double quote"),
+                            "Unexpected error message: {}",
+                            msg
+                        );
+                    }
+                    // If the error is of any other type, that's unexpected.
+                    other => panic!("Expected a Custom error reason, got {:?}", other),
+                }
+            }
+            Ok(_) => panic!("Expected an error for an unclosed double-quoted string"),
+        }
+    }
+
+    #[test]
+    fn test_double_quoted_with_consecutive_escapes() {
+        let parser = LiteralParserBuilder::new().build();
+        // Test with multiple consecutive escape sequences:
+
+        // Test with multiple consecutive escape sequences.
+        // The input is:
+        //   "line1\nline2\tend"
+        //
+        // Here’s a breakdown by index:
+        //   0: "          -> opening quote
+        //   1: l
+        //   2: i
+        //   3: n
+        //   4: e
+        //   5: 1
+        //   6: \          -> backslash (escaping the n)
+        //   7: n          -> newline escape, becomes \n in parsed string
+        //   8: l
+        //   9: i
+        //  10: n
+        //  11: e
+        //  12: 2
+        //  13: \          -> backslash (escaping the t)
+        //  14: t          -> tab escape, becomes \t in parsed string
+        //  15: e
+        //  16: n
+        //  17: d
+        //  18: "          -> closing quote
+        //
+        // Thus, the overall span of the literal is 0..19.
+        let input = r#""line1\nline2\tend""#;
+
+        let expected = Expr::LiteralStr(Spanned("line1\nline2\tend".to_string(), 0..19));
+
+        assert_eq!(parser.parse(input), Ok(expected));
     }
 
     // Property-based tests for numeric literals.
