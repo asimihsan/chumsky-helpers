@@ -16,6 +16,7 @@ setup:
     devbox run mise trust
     devbox run mise install
     rustup toolchain install nightly
+    cargo +stable install cargo-llvm-cov --locked
     rustup component add llvm-tools-preview --toolchain nightly-aarch64-apple-darwin
     rustup component add rustfmt
     rustup component add clippy
