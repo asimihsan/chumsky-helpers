@@ -80,6 +80,9 @@ test: rust-test
 cov:
     cargo llvm-cov nextest
 
+cov-local-web:
+    cargo +nightly llvm-cov nextest --no-fail-fast --open --show-missing-lines --mcdc
+    
 cov-local:
     cargo +nightly llvm-cov nextest --no-fail-fast --text --show-missing-lines --mcdc
 

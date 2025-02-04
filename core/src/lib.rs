@@ -5,6 +5,7 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
+pub mod datetime;
 pub mod literal;
 pub mod number;
 
