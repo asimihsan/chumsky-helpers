@@ -5,40 +5,44 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
+use chumsky::error::LabelError;
+use chumsky::error::Simple;
 use chumsky::prelude::*;
 use std::convert::TryFrom;
 use time::{Date, Month};
 
-// A simple digit parser
-fn digit() -> impl Parser<char, char, Error = Simple<char>> {
-    filter(|c: &char| c.is_ascii_digit()).labelled("digit")
-}
-
 // Parser for one or more digits
-fn number(digits: usize) -> impl Parser<char, String, Error = Simple<char>> {
-    digit().repeated().exactly(digits).collect::<String>().labelled("digit")
+fn number<'a>(digits: usize) -> impl Parser<'a, &'a str, String> {
+    text::digits(10)
+        .repeated()
+        .exactly(digits)
+        .to_slice()
+        .from_str()
+        .unwrapped()
+        .labelled(format!("{}-digit number", digits))
 }
 
-fn any_number() -> impl Parser<char, String, Error = Simple<char>> {
-    digit().repeated().at_least(1).collect::<String>()
+fn any_number<'a>() -> impl Parser<'a, &'a str, String> {
+    text::digits(10).repeated().at_least(1).to_slice().from_str().unwrapped().labelled("number")
 }
 
 // Parser for a decimal number (integer and optional fractional part)
-fn decimal_number() -> impl Parser<char, f64, Error = Simple<char>> {
-    let int_part = digit().repeated().at_least(1).collect::<String>();
-    let frac_part =
-        just('.').ignore_then(digit().repeated().at_least(1).collect::<String>()).or_not();
+fn decimal_number<'a>() -> impl Parser<'a, &'a str, f64> {
+    let int_part = any_number();
+    let frac_part = just('.').ignore_then(any_number()).or_not();
     int_part.then(frac_part).try_map(|(i, frac), span| {
         let num_str = if let Some(frac) = frac {
             format!("{}.{}", i, frac)
         } else {
             i
         };
-        num_str.parse::<f64>().map_err(|_| Simple::custom(span, "Invalid number"))
+        num_str.parse::<f64>().map_err(|_| {
+            Simple::merge_expected_found(vec!["Invalid number".to_string()], None, span)
+        })
     })
 }
 
-pub fn iso_date_parser() -> impl Parser<char, Date, Error = Simple<char>> {
+pub fn iso_date_parser<'a>() -> impl Parser<'a, &'a str, Date> {
     // Basic: YYYYMMDD
     let basic = number(8).try_map(|s: String, span| {
         let year =
@@ -58,11 +62,13 @@ pub fn iso_date_parser() -> impl Parser<char, Date, Error = Simple<char>> {
         .try_map(|((year_str, month_str), day_str), span| {
             let year = year_str
                 .parse::<i32>()
-                .map_err(|_| Simple::custom(span.clone(), "Invalid year"))?;
-            let month: u8 =
-                month_str.parse().map_err(|_| Simple::custom(span.clone(), "Invalid month"))?;
-            let day: u8 =
-                day_str.parse().map_err(|_| Simple::custom(span.clone(), "Invalid day"))?;
+                .map_err(|_| Simple::expected_found(vec!["Invalid year"], None, span.clone()))?;
+            let month: u8 = month_str
+                .parse()
+                .map_err(|_| Simple::expected_found(vec!["Invalid month"], None, span.clone()))?;
+            let day: u8 = day_str
+                .parse()
+                .map_err(|_| Simple::expected_found(vec!["Invalid day"], None, span.clone()))?;
             Ok((year, month, day))
         });
 
@@ -82,10 +88,13 @@ pub struct IsoDuration {
     pub seconds: Option<f64>,
 }
 
-pub fn iso_duration_parser() -> impl Parser<char, IsoDuration, Error = Simple<char>> {
+pub fn iso_duration_parser<'a>() -> impl Parser<'a, &'a str, IsoDuration> {
     // Parser for an integer value
     let int_val = any_number()
-        .try_map(|s, span| s.parse::<i32>().map_err(|_| Simple::custom(span, "Invalid integer")))
+        .try_map(|s, span| {
+            s.parse::<i32>()
+                .map_err(|_| Simple::expected(span, vec!["Invalid integer".to_string()]))
+        })
         .boxed();
 
     // Define each component
@@ -137,7 +146,7 @@ pub struct GoDuration {
     pub nanos: i64,
 }
 
-pub fn go_duration_parser() -> impl Parser<char, GoDuration, Error = Simple<char>> {
+pub fn go_duration_parser<'a>() -> impl Parser<'a, &'a str, GoDuration> {
     // Order matters: longer literal units first
     let unit = choice((
         just("ns").to(1),
@@ -155,19 +164,19 @@ pub fn go_duration_parser() -> impl Parser<char, GoDuration, Error = Simple<char
     component
         .repeated()
         .at_least(1)
-        .then_ignore(end())
-        .map(|parts| GoDuration { nanos: parts.into_iter().sum() })
+        .then(end())
+        .map(|(parts, _)| GoDuration { nanos: parts.into_iter().sum() })
 }
 
-pub fn parse_iso_date(input: &str) -> Result<Date, Vec<Simple<char>>> {
+pub fn parse_iso_date(input: &str) -> chumsky::prelude::ParseResult<Date, Simple<char>> {
     iso_date_parser().parse(input)
 }
 
-pub fn parse_iso_duration(input: &str) -> Result<IsoDuration, Vec<Simple<char>>> {
+pub fn parse_iso_duration(input: &str) -> chumsky::prelude::ParseResult<IsoDuration, Simple<char>> {
     iso_duration_parser().parse(input)
 }
 
-pub fn parse_go_duration(input: &str) -> Result<GoDuration, Vec<Simple<char>>> {
+pub fn parse_go_duration(input: &str) -> chumsky::prelude::ParseResult<GoDuration, Simple<char>> {
     go_duration_parser().parse(input)
 }
 

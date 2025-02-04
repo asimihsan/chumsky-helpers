@@ -7,6 +7,9 @@
 
 use crate::number::{NumberParserBuilder, NumberValue};
 use crate::Spanned;
+use chumsky::error::LabelError;
+use chumsky::error::LabelError;
+use chumsky::error::Simple;
 use chumsky::prelude::*;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -37,67 +40,68 @@ impl LiteralParserBuilder {
         self
     }
 
-    pub fn build(self) -> impl Parser<char, Expr, Error = Simple<char>> {
+    pub fn build<'a>(self) -> impl Parser<'a, &'a str, Expr> {
         // Number parser with span
         let number = NumberParserBuilder::new()
             .negative(true)
             .float(true)
             .scientific(true)
             .build()
-            .map_with_span(|n, span| Expr::LiteralNum(Spanned(n, span)));
+            .map_with(|n, span| Expr::LiteralNum(Spanned(n, span.clone())));
 
         // Double-quoted strings with span
-        let normal_dq = none_of("\\\"").map(|c: char| c.to_string());
-        let escaped_dq = just('\\')
+        let normal_dq = none_of("\\\"").map(|c| c.to_string());
+        let escaped_dq = just("\\")
             .ignore_then(choice((
-                just('\\').to("\\"),
-                just('/').to("/"),
-                just('"').to("\""),
-                just('n').to("\n"),
-                just('r').to("\r"),
-                just('t').to("\t"),
+                just("\\").to("\\"),
+                just("/").to("/"),
+                just("\"").to("\""),
+                just("n").to("\n"),
+                just("r").to("\r"),
+                just("t").to("\t"),
             )))
             .map(|s: &str| s.to_string());
         let dq_content =
-            choice((normal_dq, escaped_dq)).repeated().map(|v: Vec<String>| v.concat());
-        let double_quoted = just('"')
+            choice((normal_dq, escaped_dq)).repeated().collect::<Vec<String>>().map(|v| v.concat());
+        let double_quoted = just("\"")
             .ignore_then(dq_content)
             .then_ignore(
                 just('"').or_not().try_map(|opt_quote, span| match opt_quote {
                     Some(_) => Ok(()),
-                    None => Err(Simple::custom(span, "Unclosed double quote")),
+                    None => Err(Simple::merge_expected_found(
+                        vec!["Unclosed double quote".to_string()],
+                        None,
+                        span,
+                    )),
                 }),
             )
-            .map_with_span(|s, span| Expr::LiteralStr(Spanned(s, span)));
+            .map_with(|s, span| Expr::LiteralStr(Spanned(s, span)));
 
         // Raw string parser – always attempt to parse, then decide allowed vs. disallowed.
-        let raw_string = just('`')
-            .ignore_then(filter(|&c| c != '`').repeated().collect::<String>())
-            .then_ignore(just('`'))
-            .map_with_span(move |s, span| {
+        let raw_string = just("`")
+            .ignore_then(none_of("`").repeated().collect::<String>())
+            .then_ignore(just("`"))
+            .map_with(move |s, span| {
                 if self.allow_raw_string {
-                    Expr::LiteralStr(Spanned(s, span))
+                    Expr::LiteralStr((s, span))
                 } else {
-                    Expr::Error(Spanned(
-                        "raw string literals are not allowed".to_string(),
-                        span,
-                    ))
+                    Expr::Error(("raw string literals are not allowed".to_string(), span))
                 }
             })
             .boxed();
 
         // Single-quoted string parser – always attempt to parse.
-        let single_quoted = just('\'')
+        let single_quoted = just("'")
             .ignore_then(
                 choice((
-                    none_of("\\'").map(|c: char| c.to_string()),
-                    just('\\')
+                    none_of("\\'").map(|c| c.to_string()),
+                    just("\\")
                         .ignore_then(choice((
-                            just('\\').to("\\"),
-                            just('\'').to("'"),
-                            just('n').to("\n"),
-                            just('r').to("\r"),
-                            just('t').to("\t"),
+                            just("\\").to("\\"),
+                            just("'").to("'"),
+                            just("n").to("\n"),
+                            just("r").to("\r"),
+                            just("t").to("\t"),
                         )))
                         .map(|s: &str| s.to_string()),
                 ))
@@ -107,9 +111,9 @@ impl LiteralParserBuilder {
             .then_ignore(just('\''))
             .map_with_span(move |s, span| {
                 if self.allow_single_quote {
-                    Expr::LiteralStr(Spanned(s, span))
+                    Expr::LiteralStr((s, span))
                 } else {
-                    Expr::Error(Spanned(
+                    Expr::Error((
                         "single-quoted string literals are not allowed".to_string(),
                         span,
                     ))

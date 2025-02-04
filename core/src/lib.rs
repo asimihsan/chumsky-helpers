@@ -9,8 +9,7 @@ pub mod datetime;
 pub mod literal;
 pub mod number;
 
-use std::ops::Range;
+use chumsky::span::SimpleSpan;
 
-// It's common for AST nodes to use a wrapper type that allows attaching span information to them
-#[derive(Debug, Clone, PartialEq)]
-pub struct Spanned<T>(T, Range<usize>);
+pub type Span = SimpleSpan;
+pub type Spanned<T> = (T, Span);

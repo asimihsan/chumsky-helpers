@@ -5,8 +5,8 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
+use chumsky::error::Simple;
 use chumsky::prelude::*;
-use std::ops::Range;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum NumberValue {
@@ -57,15 +57,15 @@ impl NumberParserBuilder {
         self
     }
 
-    fn sign_parser() -> impl Parser<char, Sign, Error = Simple<char>> {
-        choice((just('+').to(Sign::Positive), just('-').to(Sign::Negative)))
+    fn sign_parser<'a>() -> impl Parser<'a, &'a str, Sign> {
+        choice((just("+").to(Sign::Positive), just("-").to(Sign::Negative)))
             .or_not()
             .map(|s| s.unwrap_or(Sign::None))
     }
 
-    pub fn build(self) -> impl Parser<char, NumberValue, Error = Simple<char>> {
+    pub fn build<'a>(self) -> impl Parser<'a, &'a str, NumberValue> {
         let digits = text::int(10);
-        let integer = digits.map(|s: String| s.parse::<i64>().unwrap());
+        let integer = digits.map(|s: &str| s.parse::<i64>().unwrap());
         let decimal = just('.').ignore_then(text::digits(10)).map(Some).or_not();
         let exponent = choice((just('e'), just('E')))
             .ignore_then(Self::sign_parser().then(text::int(10)))
@@ -79,7 +79,11 @@ impl NumberParserBuilder {
         Self::sign_parser().then(integer).then(decimal).then(exponent).try_map(
             move |(((sign, int), dec), exp), span: Range<usize>| {
                 if matches!(sign, Sign::Negative) && !allow_negative {
-                    return Err(Simple::custom(span, "Negative numbers not allowed"));
+                    return Err(Simple::merge_expected_found(
+                        vec!["Negative numbers not allowed".to_string()],
+                        None,
+                        span,
+                    ));
                 }
 
                 let mut num_str = String::new();
@@ -90,7 +94,11 @@ impl NumberParserBuilder {
 
                 let has_decimal = if let Some(dec_str) = dec.as_ref().and_then(|d| d.as_ref()) {
                     if !allow_float {
-                        return Err(Simple::custom(span, "Float numbers not allowed"));
+                        return Err(Simple::merge_expected_found(
+                            vec!["Float numbers not allowed".to_string()],
+                            None,
+                            span,
+                        ));
                     }
                     num_str.push('.');
                     num_str.push_str(dec_str);
@@ -102,7 +110,11 @@ impl NumberParserBuilder {
                 let has_exponent =
                     if let Some((exp_sign, exp_str)) = exp.as_ref().and_then(|e| e.as_ref()) {
                         if !allow_scientific {
-                            return Err(Simple::custom(span, "Scientific notation not allowed"));
+                            return Err(Simple::expected_found(
+                                vec!["Scientific notation not allowed"],
+                                None,
+                                span,
+                            ));
                         }
                         num_str.push('e');
                         match exp_sign {
