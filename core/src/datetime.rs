@@ -193,19 +193,19 @@ pub fn iso_date_parser<'a>() -> impl Parser<'a, &'a str, Date, extra::Err<Rich<'
 pub struct IsoDuration {
     /// The number of years in the duration, if specified.
     pub years: Option<i32>,
-    
+
     /// The number of months in the duration, if specified.
     pub months: Option<i32>,
-    
+
     /// The number of days in the duration, if specified.
     pub days: Option<i32>,
-    
+
     /// The number of hours in the duration, if specified.
     pub hours: Option<i32>,
-    
+
     /// The number of minutes in the duration, if specified.
     pub minutes: Option<i32>,
-    
+
     /// The number of seconds in the duration, if specified.
     /// May include fractional seconds.
     pub seconds: Option<f64>,

@@ -75,20 +75,20 @@ use chumsky::{error::Rich, prelude::*};
 pub enum NumberValue {
     /// An integer value.
     Integer(i64),
-    
+
     /// A floating point value with preserved components.
-    Float { 
+    Float {
         /// The calculated floating point value.
-        value: f64, 
-        
+        value: f64,
+
         /// The base component (digits before the decimal point).
-        base: String, 
-        
+        base: String,
+
         /// The decimal component (digits after the decimal point), if any.
-        decimal: Option<String>, 
-        
+        decimal: Option<String>,
+
         /// The exponent component with sign, if any.
-        exponent: Option<(Sign, String)> 
+        exponent: Option<(Sign, String)>,
     },
 }
 
@@ -136,10 +136,10 @@ impl NumberValue {
 pub enum Sign {
     /// Explicitly positive (preceded by `+`).
     Positive,
-    
+
     /// Explicitly negative (preceded by `-`).
     Negative,
-    
+
     /// No explicit sign.
     None,
 }

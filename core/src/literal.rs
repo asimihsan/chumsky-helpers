@@ -8,7 +8,7 @@
 //! # Literal Parsing
 //!
 //! This module provides parsers for literal values, including string literals with different
-//! quoting styles and number literals. The literal parser is configurable, allowing you to 
+//! quoting styles and number literals. The literal parser is configurable, allowing you to
 //! control which types of string literals are supported.
 //!
 //! ## Features
@@ -72,10 +72,10 @@ use chumsky::{error::Rich, prelude::*};
 pub enum Expr {
     /// An error with a message and span, used when a disallowed literal type is encountered.
     Error(Spanned<String>),
-    
+
     /// A string literal with its value and span.
     LiteralStr(Spanned<String>),
-    
+
     /// A numeric literal with its value and span.
     LiteralNum(Spanned<NumberValue>),
 }
