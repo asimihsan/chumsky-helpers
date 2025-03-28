@@ -5,17 +5,85 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
+//! # Literal Parsing
+//!
+//! This module provides parsers for literal values, including string literals with different
+//! quoting styles and number literals. The literal parser is configurable, allowing you to 
+//! control which types of string literals are supported.
+//!
+//! ## Features
+//!
+//! * Parse double-quoted string literals with escape sequences (`"hello\nworld"`)
+//! * Optionally parse single-quoted string literals (`'hello\tworld'`)
+//! * Optionally parse raw string literals (`` `raw string` ``)
+//! * Parse number literals (integers, floats, scientific notation)
+//! * Error reporting with clear messages and spans
+//!
+//! ## Examples
+//!
+//! ```
+//! use chumsky_helpers::literal::{LiteralParserBuilder, Expr};
+//! use chumsky::prelude::*;
+//!
+//! // Create a parser that allows all string literal styles
+//! let parser = LiteralParserBuilder::new()
+//!     .single_quote(true)
+//!     .raw_string(true)
+//!     .build();
+//!
+//! // Parse a double-quoted string with escape sequences
+//! let result = parser.parse("\"hello\\nworld\"").into_result().unwrap();
+//! match result {
+//!     Expr::LiteralStr((s, _)) => assert_eq!(s, "hello\nworld"),
+//!     _ => panic!("Expected string literal"),
+//! }
+//!
+//! // Parse a single-quoted string
+//! let result = parser.parse("'escaped \\'quote\\''").into_result().unwrap();
+//! match result {
+//!     Expr::LiteralStr((s, _)) => assert_eq!(s, "escaped 'quote'"),
+//!     _ => panic!("Expected string literal"),
+//! }
+//!
+//! // Parse a raw string
+//! let result = parser.parse("`raw \\n string`").into_result().unwrap();
+//! match result {
+//!     Expr::LiteralStr((s, _)) => assert_eq!(s, "raw \\n string"),
+//!     _ => panic!("Expected string literal"),
+//! }
+//!
+//! // Parse a number
+//! let result = parser.parse("42").into_result().unwrap();
+//! match result {
+//!     Expr::LiteralNum(_) => (),
+//!     _ => panic!("Expected number literal"),
+//! }
+//! ```
+
 use crate::number::{NumberParserBuilder, NumberValue};
 use crate::Spanned;
 use chumsky::{error::Rich, prelude::*};
 
+/// Represents a parsed literal expression.
+///
+/// This enum captures the result of parsing a literal value, which can be
+/// a string, a number, or an error (used when a disallowed literal type is encountered).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
+    /// An error with a message and span, used when a disallowed literal type is encountered.
     Error(Spanned<String>),
+    
+    /// A string literal with its value and span.
     LiteralStr(Spanned<String>),
+    
+    /// A numeric literal with its value and span.
     LiteralNum(Spanned<NumberValue>),
 }
 
+/// Builder for configuring and creating a literal parser.
+///
+/// This builder allows you to customize which types of string literals are
+/// allowed in the parser, such as single-quoted strings and raw strings.
 #[derive(Debug, Default)]
 pub struct LiteralParserBuilder {
     allow_single_quote: bool,
@@ -23,20 +91,39 @@ pub struct LiteralParserBuilder {
 }
 
 impl LiteralParserBuilder {
+    /// Create a new builder with default settings.
+    ///
+    /// By default, double-quoted strings are always allowed, but
+    /// single-quoted strings and raw strings are disabled and must
+    /// be explicitly enabled.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Configure whether single-quoted strings are allowed.
+    ///
+    /// When enabled, the parser will accept strings like `'hello\tworld'`.
+    /// When disabled, these will be parsed as `Expr::Error` with an appropriate message.
     pub fn single_quote(mut self, allow: bool) -> Self {
         self.allow_single_quote = allow;
         self
     }
 
+    /// Configure whether raw strings are allowed.
+    ///
+    /// When enabled, the parser will accept strings like `` `raw string` ``.
+    /// When disabled, these will be parsed as `Expr::Error` with an appropriate message.
     pub fn raw_string(mut self, allow: bool) -> Self {
         self.allow_raw_string = allow;
         self
     }
 
+    /// Build the configured literal parser.
+    ///
+    /// Creates a parser based on the current configuration that can
+    /// parse literal values into the `Expr` enum. Double-quoted strings
+    /// and numbers are always supported, while single-quoted strings and
+    /// raw strings can be enabled or disabled.
     pub fn build<'a>(self) -> impl Parser<'a, &'a str, Expr, extra::Err<Rich<'a, char>>> {
         // Number parser with span
         let number = NumberParserBuilder::new()
@@ -302,7 +389,7 @@ mod tests {
         // The input is:
         //   "line1\nline2\tend"
         //
-        // Here’s a breakdown by index:
+        // Here's a breakdown by index:
         //   0: "          -> opening quote
         //   1: l
         //   2: i

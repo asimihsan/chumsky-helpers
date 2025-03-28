@@ -5,15 +5,95 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
+//! # Number Parsing
+//!
+//! This module provides a configurable parser for numeric literals, supporting integers,
+//! floating point numbers, and scientific notation with customizable options.
+//!
+//! The parser not only calculates the correct numeric value but also preserves the original
+//! string components of the parsed number, allowing for high-precision arithmetic operations
+//! that might be lost in floating-point representation.
+//!
+//! ## Features
+//!
+//! * Parse integer numbers
+//! * Parse floating point numbers with decimal parts
+//! * Parse scientific notation (e.g., `1.23e-4`)
+//! * Configure which numeric formats are allowed
+//! * Access both the calculated value and original components
+//!
+//! ## Examples
+//!
+//! Basic parsing of integers:
+//!
+//! ```
+//! use chumsky_helpers::number::{NumberParserBuilder, NumberValue};
+//! use chumsky::prelude::*;
+//!
+//! let parser = NumberParserBuilder::new()
+//!     .negative(true)
+//!     .build();
+//!
+//! assert_eq!(
+//!     parser.parse("42").into_result(),
+//!     Ok(NumberValue::Integer(42))
+//! );
+//! ```
+//!
+//! Parsing floating point numbers with component preservation:
+//!
+//! ```
+//! use chumsky_helpers::number::{NumberParserBuilder, NumberValue, Sign};
+//! use chumsky::prelude::*;
+//!
+//! let parser = NumberParserBuilder::new()
+//!     .negative(true)
+//!     .float(true)
+//!     .scientific(true)
+//!     .build();
+//!
+//! let result = parser.parse("-123.456e+7").into_result().unwrap();
+//! match result {
+//!     NumberValue::Float { value, base, decimal, exponent } => {
+//!         assert_eq!(value, -123.456e+7);
+//!         assert_eq!(base, "123");
+//!         assert_eq!(decimal, Some("456".to_string()));
+//!         assert_eq!(exponent, Some((Sign::Positive, "7".to_string())));
+//!     },
+//!     _ => panic!("Expected Float variant"),
+//! }
+//! ```
+
 use chumsky::{error::Rich, prelude::*};
 
+/// Represents a parsed numeric value, either as an integer or a floating point number.
+///
+/// The `Float` variant preserves the original components of the parsed number,
+/// allowing for high-precision arithmetic operations that might be lost in floating-point
+/// representation.
 #[derive(Debug, Clone, PartialEq)]
 pub enum NumberValue {
+    /// An integer value.
     Integer(i64),
-    Float { value: f64, base: String, decimal: Option<String>, exponent: Option<(Sign, String)> },
+    
+    /// A floating point value with preserved components.
+    Float { 
+        /// The calculated floating point value.
+        value: f64, 
+        
+        /// The base component (digits before the decimal point).
+        base: String, 
+        
+        /// The decimal component (digits after the decimal point), if any.
+        decimal: Option<String>, 
+        
+        /// The exponent component with sign, if any.
+        exponent: Option<(Sign, String)> 
+    },
 }
 
 impl NumberValue {
+    /// Converts the number value to an f64, regardless of whether it's an integer or float.
     pub fn as_f64(&self) -> f64 {
         match self {
             NumberValue::Integer(i) => *i as f64,
@@ -21,6 +101,8 @@ impl NumberValue {
         }
     }
 
+    /// Returns the base component of the number (digits before the decimal point).
+    /// For integers, returns an empty string.
     pub fn base(&self) -> &str {
         match self {
             NumberValue::Integer(_) => "", // Integer doesn't have separate base
@@ -28,6 +110,8 @@ impl NumberValue {
         }
     }
 
+    /// Returns the decimal component of the number (digits after the decimal point), if any.
+    /// For integers, returns `None`.
     pub fn decimal(&self) -> Option<&str> {
         match self {
             NumberValue::Integer(_) => None,
@@ -35,6 +119,8 @@ impl NumberValue {
         }
     }
 
+    /// Returns the exponent component of the number with its sign, if any.
+    /// For integers, returns `None`.
     pub fn exponent(&self) -> Option<(Sign, &str)> {
         match self {
             NumberValue::Integer(_) => None,
@@ -45,13 +131,24 @@ impl NumberValue {
     }
 }
 
+/// Represents the sign of a number or exponent.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Sign {
+    /// Explicitly positive (preceded by `+`).
     Positive,
+    
+    /// Explicitly negative (preceded by `-`).
     Negative,
+    
+    /// No explicit sign.
     None,
 }
 
+/// Builder for configuring and creating a number parser.
+///
+/// This builder allows you to customize which numeric formats are allowed
+/// in the parser, such as negative numbers, floating point numbers, and
+/// scientific notation.
 #[derive(Debug, Default)]
 pub struct NumberParserBuilder {
     allow_negative: bool,
@@ -60,31 +157,42 @@ pub struct NumberParserBuilder {
 }
 
 impl NumberParserBuilder {
+    /// Create a new builder with default settings.
+    ///
+    /// By default, all formats are disabled and must be explicitly enabled.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Configure whether negative numbers are allowed.
     pub fn negative(mut self, allow: bool) -> Self {
         self.allow_negative = allow;
         self
     }
 
+    /// Configure whether floating point numbers are allowed.
     pub fn float(mut self, allow: bool) -> Self {
         self.allow_float = allow;
         self
     }
 
+    /// Configure whether scientific notation is allowed.
     pub fn scientific(mut self, allow: bool) -> Self {
         self.allow_scientific = allow;
         self
     }
 
+    /// Parser for signs (`+`, `-`, or none).
     fn sign_parser<'a>() -> impl Parser<'a, &'a str, Sign, extra::Err<Rich<'a, char>>> {
         choice((just("+").to(Sign::Positive), just("-").to(Sign::Negative)))
             .or_not()
             .map(|s| s.unwrap_or(Sign::None))
     }
 
+    /// Build the configured number parser.
+    ///
+    /// Creates a parser based on the current configuration that can
+    /// parse numeric literals into the `NumberValue` type.
     pub fn build<'a>(self) -> impl Parser<'a, &'a str, NumberValue, extra::Err<Rich<'a, char>>> {
         let digits = text::int(10);
         let integer = digits.map(|s: &str| s.parse::<i64>().unwrap());

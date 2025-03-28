@@ -5,6 +5,64 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
+//! # Date and Duration Parsing
+//!
+//! This module provides parsers for date and duration formats including:
+//!
+//! * ISO 8601 dates (basic and extended formats)
+//! * ISO 8601 durations
+//! * Go-style time durations
+//!
+//! All parsers provide detailed error reporting with spans indicating exactly where
+//! in the input the error occurred and what was expected.
+//!
+//! ## Examples
+//!
+//! ### Parsing ISO 8601 Dates
+//!
+//! ```
+//! use chumsky_helpers::datetime::parse_iso_date;
+//! use time::Month;
+//!
+//! // Parse a basic ISO date format (YYYYMMDD)
+//! let date = parse_iso_date("20240204").unwrap();
+//! assert_eq!(date.year(), 2024);
+//! assert_eq!(date.month(), Month::February);
+//! assert_eq!(date.day(), 4);
+//!
+//! // Parse an extended ISO date format (YYYY-MM-DD)
+//! let date = parse_iso_date("2024-02-04").unwrap();
+//! assert_eq!(date.year(), 2024);
+//! assert_eq!(date.month(), Month::February);
+//! assert_eq!(date.day(), 4);
+//! ```
+//!
+//! ### Parsing ISO 8601 Durations
+//!
+//! ```
+//! use chumsky_helpers::datetime::parse_iso_duration;
+//!
+//! // Parse a full ISO duration with date and time components
+//! let duration = parse_iso_duration("P1Y2M3DT4H5M6.789S").unwrap();
+//! assert_eq!(duration.years, Some(1));
+//! assert_eq!(duration.months, Some(2));
+//! assert_eq!(duration.days, Some(3));
+//! assert_eq!(duration.hours, Some(4));
+//! assert_eq!(duration.minutes, Some(5));
+//! assert_eq!(duration.seconds, Some(6.789));
+//! ```
+//!
+//! ### Parsing Go-style Durations
+//!
+//! ```
+//! use chumsky_helpers::datetime::parse_go_duration;
+//!
+//! // Parse a Go duration format
+//! let duration = parse_go_duration("2h3m4s").unwrap();
+//! let expected_nanos = 2 * 3600 * 1_000_000_000 + 3 * 60 * 1_000_000_000 + 4 * 1_000_000_000;
+//! assert_eq!(duration.nanos, expected_nanos);
+//! ```
+
 use chumsky::combinator::Repeated;
 use chumsky::error::LabelError;
 use chumsky::extra::ParserExtra;
@@ -63,6 +121,10 @@ where
         .exactly(length)
 }
 
+/// Creates a parser for ISO 8601 date formats.
+///
+/// This parser supports both the basic format (YYYYMMDD) and extended format (YYYY-MM-DD).
+/// It returns a `time::Date` object representing the parsed date.
 pub fn iso_date_parser<'a>() -> impl Parser<'a, &'a str, Date, extra::Err<Rich<'a, char>>> {
     let year_digits = exactly_digits(4).to_slice();
     let month_digits = exactly_digits(2).to_slice();
@@ -114,16 +176,50 @@ pub fn iso_date_parser<'a>() -> impl Parser<'a, &'a str, Date, extra::Err<Rich<'
         .boxed()
 }
 
+/// Represents an ISO 8601 duration.
+///
+/// This struct holds the components of an ISO 8601 duration, which can include years, months,
+/// days, hours, minutes, and seconds. Any component that is not present in the parsed input
+/// will be set to `None`.
+///
+/// For example, a duration like "P1Y2M3DT4H5M6.789S" would have all components set:
+/// - years: Some(1)
+/// - months: Some(2)
+/// - days: Some(3)
+/// - hours: Some(4)
+/// - minutes: Some(5)
+/// - seconds: Some(6.789)
 #[derive(Debug, Clone, PartialEq)]
 pub struct IsoDuration {
+    /// The number of years in the duration, if specified.
     pub years: Option<i32>,
+    
+    /// The number of months in the duration, if specified.
     pub months: Option<i32>,
+    
+    /// The number of days in the duration, if specified.
     pub days: Option<i32>,
+    
+    /// The number of hours in the duration, if specified.
     pub hours: Option<i32>,
+    
+    /// The number of minutes in the duration, if specified.
     pub minutes: Option<i32>,
+    
+    /// The number of seconds in the duration, if specified.
+    /// May include fractional seconds.
     pub seconds: Option<f64>,
 }
 
+/// Creates a parser for ISO 8601 duration formats.
+///
+/// This parser supports the full ISO 8601 duration syntax, including both date and time
+/// components. The parser will return an `IsoDuration` object containing the parsed components.
+///
+/// Example formats:
+/// - "P1Y2M3D" (1 year, 2 months, 3 days)
+/// - "PT4H5M6S" (4 hours, 5 minutes, 6 seconds)
+/// - "P1Y2M3DT4H5M6.789S" (1 year, 2 months, 3 days, 4 hours, 5 minutes, 6.789 seconds)
 pub fn iso_duration_parser<'a>() -> impl Parser<'a, &'a str, IsoDuration, extra::Err<Rich<'a, char>>>
 {
     // Parser for an integer value
@@ -177,11 +273,36 @@ pub fn iso_duration_parser<'a>() -> impl Parser<'a, &'a str, IsoDuration, extra:
         .boxed()
 }
 
+/// Represents a Go-style duration.
+///
+/// This struct holds a duration in nanoseconds, as used in the Go programming language.
+/// The nanosecond value is calculated from the sum of all the duration components
+/// in the parsed input.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GoDuration {
+    /// The total duration in nanoseconds.
     pub nanos: i64,
 }
 
+/// Creates a parser for Go-style duration formats.
+///
+/// This parser supports the Go duration syntax, which consists of a sequence of
+/// time units with optional decimal values. The parser will return a `GoDuration`
+/// object containing the total duration in nanoseconds.
+///
+/// Supported units:
+/// - "h" (hours)
+/// - "m" (minutes)
+/// - "s" (seconds)
+/// - "ms" (milliseconds)
+/// - "µs" (microseconds)
+/// - "ns" (nanoseconds)
+///
+/// Example formats:
+/// - "2h3m4s" (2 hours, 3 minutes, 4 seconds)
+/// - "1.5h" (1.5 hours)
+/// - "500ms" (500 milliseconds)
+/// - "1h30m45s" (1 hour, 30 minutes, 45 seconds)
 pub fn go_duration_parser<'a>() -> impl Parser<'a, &'a str, GoDuration, extra::Err<Rich<'a, char>>>
 {
     // Order matters: longer literal units first
@@ -207,14 +328,85 @@ pub fn go_duration_parser<'a>() -> impl Parser<'a, &'a str, GoDuration, extra::E
         .boxed()
 }
 
+/// Parses an ISO 8601 date string.
+///
+/// This function supports both the basic format (YYYYMMDD) and extended format (YYYY-MM-DD).
+/// It returns a `ParseResult` containing either the parsed `Date` or error information.
+///
+/// # Examples
+///
+/// ```
+/// use chumsky_helpers::datetime::parse_iso_date;
+///
+/// // Parse a basic ISO date
+/// let date = parse_iso_date("20240204").unwrap();
+/// assert_eq!(date.year(), 2024);
+/// assert_eq!(date.month(), time::Month::February);
+/// assert_eq!(date.day(), 4);
+///
+/// // Parse an extended ISO date
+/// let date = parse_iso_date("2024-02-04").unwrap();
+/// assert_eq!(date.year(), 2024);
+/// assert_eq!(date.month(), time::Month::February);
+/// assert_eq!(date.day(), 4);
+/// ```
 pub fn parse_iso_date(input: &str) -> ParseResult<Date, Rich<char>> {
     iso_date_parser().parse(input)
 }
 
+/// Parses an ISO 8601 duration string.
+///
+/// This function supports the full ISO 8601 duration syntax, including both date and time
+/// components. It returns a `ParseResult` containing either the parsed `IsoDuration` or error information.
+///
+/// # Examples
+///
+/// ```
+/// use chumsky_helpers::datetime::parse_iso_duration;
+///
+/// // Parse a full ISO duration
+/// let duration = parse_iso_duration("P1Y2M3DT4H5M6.789S").unwrap();
+/// assert_eq!(duration.years, Some(1));
+/// assert_eq!(duration.months, Some(2));
+/// assert_eq!(duration.days, Some(3));
+/// assert_eq!(duration.hours, Some(4));
+/// assert_eq!(duration.minutes, Some(5));
+/// assert_eq!(duration.seconds, Some(6.789));
+///
+/// // Parse a date-only ISO duration
+/// let duration = parse_iso_duration("P1Y2M3D").unwrap();
+/// assert_eq!(duration.years, Some(1));
+/// assert_eq!(duration.months, Some(2));
+/// assert_eq!(duration.days, Some(3));
+/// assert_eq!(duration.hours, None);
+/// assert_eq!(duration.minutes, None);
+/// assert_eq!(duration.seconds, None);
+/// ```
 pub fn parse_iso_duration(input: &str) -> ParseResult<IsoDuration, Rich<char>> {
     iso_duration_parser().parse(input)
 }
 
+/// Parses a Go-style duration string.
+///
+/// This function supports the Go duration syntax, which consists of a sequence of
+/// time units with optional decimal values. It returns a `ParseResult` containing
+/// either the parsed `GoDuration` or error information.
+///
+/// # Examples
+///
+/// ```
+/// use chumsky_helpers::datetime::parse_go_duration;
+///
+/// // Parse a simple Go duration
+/// let duration = parse_go_duration("2h3m4s").unwrap();
+/// let expected = 2 * 3600 * 1_000_000_000 + 3 * 60 * 1_000_000_000 + 4 * 1_000_000_000;
+/// assert_eq!(duration.nanos, expected);
+///
+/// // Parse a Go duration with fractional values
+/// let duration = parse_go_duration("1.5h").unwrap();
+/// let expected = (1.5 * 3600.0 * 1_000_000_000.0) as i64;
+/// assert_eq!(duration.nanos, expected);
+/// ```
 pub fn parse_go_duration(input: &str) -> ParseResult<GoDuration, Rich<char>> {
     go_duration_parser().parse(input)
 }
