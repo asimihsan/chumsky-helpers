@@ -7,7 +7,7 @@
 
 use crate::number::{NumberParserBuilder, NumberValue};
 use crate::Spanned;
-use chumsky::prelude::*;
+use chumsky::{error::Rich, prelude::*};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
@@ -37,7 +37,7 @@ impl LiteralParserBuilder {
         self
     }
 
-    pub fn build<'a>(self) -> impl Parser<'a, &'a str, extra::Err<Rich<'a, Expr>>> {
+    pub fn build<'a>(self) -> impl Parser<'a, &'a str, Expr, extra::Err<Rich<'a, char>>> {
         // Number parser with span
         let number = NumberParserBuilder::new()
             .negative(true)
@@ -119,7 +119,6 @@ impl LiteralParserBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Spanned;
     use chumsky::Parser;
     use proptest::prelude::*;
 
@@ -127,39 +126,39 @@ mod tests {
     fn test_double_quoted_literal() {
         let parser = LiteralParserBuilder::new().build();
         let input = r#""hello\nworld""#;
-        let expected = Expr::LiteralStr(Spanned("hello\nworld".to_string(), 0..14));
-        assert_eq!(parser.parse(input), Ok(expected));
+        let expected = Expr::LiteralStr(("hello\nworld".to_string(), (0..14).into()));
+        assert_eq!(parser.parse(input).into_result(), Ok(expected));
     }
 
     #[test]
     fn test_invalid_double_quote_unclosed() {
         let parser = LiteralParserBuilder::new().build();
         let input = r#""unclosed string"#;
-        assert!(parser.parse(input).is_err());
+        assert!(parser.parse(input).has_errors());
     }
 
     #[test]
     fn test_number_literal() {
         let parser = LiteralParserBuilder::new().build();
         let input = "42";
-        let expected = Expr::LiteralNum(Spanned(NumberValue::Integer(42), 0..2));
-        assert_eq!(parser.parse(input), Ok(expected));
+        let expected = Expr::LiteralNum((NumberValue::Integer(42), (0..2).into()));
+        assert_eq!(parser.parse(input).into_result(), Ok(expected));
     }
 
     #[test]
     fn test_single_quoted_literal_allowed() {
         let parser = LiteralParserBuilder::new().single_quote(true).build();
         let input = r#"'hello\tworld'"#;
-        let expected = Expr::LiteralStr(Spanned("hello\tworld".to_string(), 0..14));
-        assert_eq!(parser.parse(input), Ok(expected));
+        let expected = Expr::LiteralStr(("hello\tworld".to_string(), (0..14).into()));
+        assert_eq!(parser.parse(input).into_result(), Ok(expected));
     }
 
     #[test]
     fn test_single_quoted_literal_disallowed() {
         let parser = LiteralParserBuilder::new().single_quote(false).build();
         let input = r#"'hello'"#;
-        match parser.parse(input) {
-            Ok(Expr::Error(Spanned(msg, _))) => {
+        match parser.parse(input).into_result() {
+            Ok(Expr::Error((msg, _))) => {
                 assert_eq!(msg, "single-quoted string literals are not allowed");
             }
             _ => panic!("Expected Expr::Error"),
@@ -172,11 +171,11 @@ mod tests {
         let parser = LiteralParserBuilder::new().single_quote(false).build();
         let input = "'example'";
         // We expect the parser to return an error variant for single-quoted literals.
-        match parser.parse(input) {
-            Ok(Expr::Error(Spanned(msg, span))) => {
+        match parser.parse(input).into_result() {
+            Ok(Expr::Error((msg, span))) => {
                 assert_eq!(msg, "single-quoted string literals are not allowed");
                 // Optionally, verify that the span covers the input.
-                assert_eq!(span, 0..input.len());
+                assert_eq!(span, (0..input.len()).into());
             }
             other => panic!(
                 "Expected Expr::Error for a disallowed single-quoted literal, got {:?}",
@@ -189,16 +188,16 @@ mod tests {
     fn test_raw_string_literal_allowed() {
         let parser = LiteralParserBuilder::new().raw_string(true).build();
         let input = "`raw \\n string`";
-        let expected = Expr::LiteralStr(Spanned("raw \\n string".to_string(), 0..15));
-        assert_eq!(parser.parse(input), Ok(expected));
+        let expected = Expr::LiteralStr(("raw \\n string".to_string(), (0..15).into()));
+        assert_eq!(parser.parse(input).into_result(), Ok(expected));
     }
 
     #[test]
     fn test_raw_string_literal_disallowed() {
         let parser = LiteralParserBuilder::new().raw_string(false).build();
         let input = "`raw string`";
-        match parser.parse(input) {
-            Ok(Expr::Error(Spanned(msg, _))) => {
+        match parser.parse(input).into_result() {
+            Ok(Expr::Error((msg, _))) => {
                 assert_eq!(msg, "raw string literals are not allowed");
             }
             _ => panic!("Expected Expr::Error"),
@@ -211,11 +210,11 @@ mod tests {
         let parser = LiteralParserBuilder::new().raw_string(false).build();
         let input = "`some raw string`";
         // We expect the parser to return an error variant for raw strings.
-        match parser.parse(input) {
-            Ok(Expr::Error(Spanned(msg, span))) => {
+        match parser.parse(input).into_result() {
+            Ok(Expr::Error((msg, span))) => {
                 assert_eq!(msg, "raw string literals are not allowed");
                 // Optionally, verify that the span covers the input (or a part of it)
-                assert_eq!(span, 0..input.len());
+                assert_eq!(span, (0..input.len()).into());
             }
             other => panic!(
                 "Expected Expr::Error for a disallowed raw string literal, got {:?}",
@@ -230,8 +229,8 @@ mod tests {
         // An empty double-quoted literal: ""
         let input = r#""""#;
         // The span covers both double quotes (0..2)
-        let expected = Expr::LiteralStr(Spanned("".to_string(), 0..2));
-        assert_eq!(parser.parse(input), Ok(expected));
+        let expected = Expr::LiteralStr(("".to_string(), (0..2).into()));
+        assert_eq!(parser.parse(input).into_result(), Ok(expected));
     }
 
     #[test]
@@ -240,8 +239,8 @@ mod tests {
         // An empty single-quoted literal: ''
         let input = "''";
         // The span covers both single quotes (0..2)
-        let expected = Expr::LiteralStr(Spanned("".to_string(), 0..2));
-        assert_eq!(parser.parse(input), Ok(expected));
+        let expected = Expr::LiteralStr(("".to_string(), (0..2).into()));
+        assert_eq!(parser.parse(input).into_result(), Ok(expected));
     }
 
     #[test]
@@ -250,8 +249,8 @@ mod tests {
         // An empty raw string literal: ``
         let input = "``";
         // The span covers both backticks (0..2)
-        let expected = Expr::LiteralStr(Spanned("".to_string(), 0..2));
-        assert_eq!(parser.parse(input), Ok(expected));
+        let expected = Expr::LiteralStr(("".to_string(), (0..2).into()));
+        assert_eq!(parser.parse(input).into_result(), Ok(expected));
     }
 
     #[test]
@@ -259,22 +258,17 @@ mod tests {
         let parser = LiteralParserBuilder::new().build();
         // Input with an unclosed double quote
         let input = r#""unclosed"#;
-        match parser.parse(input) {
+        match parser.parse(input).into_result() {
             Err(errs) => {
                 // We expect one error, and its reason should match our expected message.
                 let first_err = &errs[0];
-                match first_err.reason() {
-                    // We expect a custom error message.
-                    SimpleReason::Custom(msg) => {
-                        assert!(
-                            msg.contains("Unclosed double quote"),
-                            "Unexpected error message: {}",
-                            msg
-                        );
-                    }
-                    // If the error is of any other type, that's unexpected.
-                    other => panic!("Expected a Custom error reason, got {:?}", other),
-                }
+                // Get error message as string
+                let msg = format!("{:?}", first_err.reason());
+                assert!(
+                    msg.contains("Unclosed double quote"),
+                    "Unexpected error message: {}",
+                    msg
+                )
             }
             Ok(_) => panic!("Expected an error for an unclosed double-quoted string"),
         }
@@ -287,15 +281,16 @@ mod tests {
         // Supply an input with an unclosed double quote.
         let input = r#""unclosed"#;
         // Parse and expect an error.
-        let err = parser.parse(input).unwrap_err();
+        let err = parser.parse(input).into_errors();
 
         // The parser returns a vector of errors. Check the first one.
-        match err[0].reason() {
-            chumsky::error::SimpleReason::Custom(msg) => {
-                assert_eq!(msg, "Unclosed double quote");
-            }
-            other => panic!("Expected a custom error reason, got {:?}", other),
-        }
+        // Get error message as string and check its content
+        let msg = format!("{:?}", err[0].reason());
+        assert!(
+            msg.contains("Unclosed double quote"),
+            "Expected error message with 'Unclosed double quote', got: {}",
+            msg
+        )
     }
 
     #[test]
@@ -331,22 +326,19 @@ mod tests {
         // Thus, the overall span of the literal is 0..19.
         let input = r#""line1\nline2\tend""#;
 
-        let expected = Expr::LiteralStr(Spanned("line1\nline2\tend".to_string(), 0..19));
+        let expected = Expr::LiteralStr(("line1\nline2\tend".to_string(), (0..19).into()));
 
-        assert_eq!(parser.parse(input), Ok(expected));
+        assert_eq!(parser.parse(input).into_result(), Ok(expected));
     }
 
     // Property-based tests for numeric literals.
     proptest! {
         #[test]
-        fn prop_numeric_literals(n in -1000i64..1000) {
+        fn prop_numeric_literals(input in (-1000i64..1000).prop_map(|n| n.to_string())) {
             let parser = LiteralParserBuilder::new().build();
-            let input = n.to_string();
-            let parsed = parser.parse(&*input).unwrap();
-            match parsed {
-                Expr::LiteralNum(Spanned(NumberValue::Integer(i), _)) => prop_assert_eq!(i, n),
-                _ => prop_assert!(false, "Expected integer literal"),
-            }
+            let expected = input.parse::<i64>().unwrap();
+            let result = parser.parse(&input).into_result().unwrap();
+            prop_assert_eq!(result, Expr::LiteralNum((NumberValue::Integer(expected), (0..input.len()).into())));
         }
     }
 
@@ -358,9 +350,9 @@ mod tests {
             let escaped = s.replace("\\", "\\\\");
             let input = format!("\"{}\"", escaped);
             let parser = LiteralParserBuilder::new().build();
-            let parsed = parser.parse(&*input).unwrap();
+            let parsed = parser.parse(input.as_str()).into_result().unwrap();
             match parsed {
-                Expr::LiteralStr(Spanned(res, _)) => prop_assert_eq!(res, s),
+                Expr::LiteralStr((res, _)) => prop_assert_eq!(res, s),
                 _ => prop_assert!(false, "Not a literal string")
             }
         }

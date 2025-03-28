@@ -5,12 +5,12 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
-use chumsky::prelude::*;
+use chumsky::{error::Rich, prelude::*};
 use std::convert::TryFrom;
 use time::{Date, Month};
 
 // Parser for one or more digits
-fn number<'a>(digits: usize) -> impl Parser<'a, &'a str, String> {
+fn number<'a>(digits: usize) -> impl Parser<'a, &'a str, String, extra::Err<Rich<'a, char>>> {
     text::digits(10)
         .repeated()
         .exactly(digits)
@@ -19,7 +19,7 @@ fn number<'a>(digits: usize) -> impl Parser<'a, &'a str, String> {
         .labelled(format!("{}-digit number", digits))
 }
 
-fn any_number<'a>() -> impl Parser<'a, &'a str, String> {
+fn any_number<'a>() -> impl Parser<'a, &'a str, String, extra::Err<Rich<'a, char>>> {
     text::digits(10)
         .repeated()
         .at_least(1)
@@ -29,7 +29,7 @@ fn any_number<'a>() -> impl Parser<'a, &'a str, String> {
 }
 
 // Parser for a decimal number (integer and optional fractional part)
-fn decimal_number<'a>() -> impl Parser<'a, &'a str, f64> {
+fn decimal_number<'a>() -> impl Parser<'a, &'a str, f64, extra::Err<Rich<'a, char>>> {
     let int_part = any_number();
     let frac_part = just('.').ignore_then(any_number()).or_not();
     int_part.then(frac_part).try_map(|(i, frac), span| {
@@ -38,16 +38,16 @@ fn decimal_number<'a>() -> impl Parser<'a, &'a str, f64> {
         } else {
             i
         };
-        num_str.parse::<f64>().map_err(|_| EmptyErr)
+        num_str.parse::<f64>().map_err(|_| Rich::custom(span, "Invalid float"))
     })
 }
 
-pub fn iso_date_parser<'a>() -> impl Parser<'a, &'a str, Date> {
+pub fn iso_date_parser<'a>() -> impl Parser<'a, &'a str, Date, extra::Err<Rich<'a, char>>> {
     let basic = number(8).try_map(|s: String, span| {
-        let year = Ok(s[0..4].parse::<i32>().map_err(|_| Rich::custom(span, "Invalid year"))?);
-        let month: u8 = Ok(s[4..6].parse().map_err(|_| Rich::custom(span, "Invalid month"))?);
-        let day: u8 = Ok(s[6..8].parse().map_err(|_| Rich::custom(span, "Invalid day"))?);
-        Ok((year?, month?, day?))
+        let year = s[0..4].parse::<i32>().map_err(|_| Rich::custom(span, "Invalid year"))?;
+        let month = s[4..6].parse::<u8>().map_err(|_| Rich::custom(span, "Invalid month"))?;
+        let day = s[6..8].parse::<u8>().map_err(|_| Rich::custom(span, "Invalid day"))?;
+        Ok((year, month, day))
     });
 
     let extended = number(4)
@@ -56,23 +56,20 @@ pub fn iso_date_parser<'a>() -> impl Parser<'a, &'a str, Date> {
         .then_ignore(just('-').labelled("expected '-'"))
         .then(number(2))
         .try_map(|((year_str, month_str), day_str), span| {
-            let year =
-                Ok(year_str.parse::<i32>().map_err(|_| Rich::custom(span, "Invalid year"))?);
-            let month: u8 =
-                Ok(month_str.parse().map_err(|_| Rich::custom(span, "Invalid month"))?);
-            let day: u8 = Ok(day_str.parse().map_err(|_| Rich::custom(span, "Invalid day"))?);
-            Ok((year?, month?, day?))
+            let year = year_str.parse::<i32>().map_err(|_| Rich::custom(span, "Invalid year"))?;
+            let month = month_str.parse::<u8>().map_err(|_| Rich::custom(span, "Invalid month"))?;
+            let day = day_str.parse::<u8>().map_err(|_| Rich::custom(span, "Invalid day"))?;
+            Ok((year, month, day))
         });
 
     basic
         .or(extended)
         .try_map(|(year, month, day), span| {
-            Ok(Month::try_from(month)
-                .map_err(|_| Rich::custom(span, "Invalid month value"))
-                .and_then(|m| {
-                    Date::from_calendar_date(year, m, day)
-                        .map_err(|_| Rich::custom(span, "Invalid date"))
-                })?)
+            let month =
+                Month::try_from(month).map_err(|_| Rich::custom(span, "Invalid month value"))?;
+            let date = Date::from_calendar_date(year, month, day)
+                .map_err(|_| Rich::custom(span, "Invalid date"))?;
+            Ok(date)
         })
         .boxed()
 }
@@ -87,12 +84,11 @@ pub struct IsoDuration {
     pub seconds: Option<f64>,
 }
 
-pub fn iso_duration_parser<'a>() -> impl Parser<'a, &'a str, IsoDuration> {
+pub fn iso_duration_parser<'a>() -> impl Parser<'a, &'a str, IsoDuration, extra::Err<Rich<'a, char>>>
+{
     // Parser for an integer value
     let int_val = any_number()
-        .try_map(|s, span| {
-            Ok(s.parse::<i32>().map_err(|_| Rich::custom(span, "Invalid integer"))?)
-        })
+        .try_map(|s, span| s.parse::<i32>().map_err(|_| Rich::custom(span, "Invalid integer")))
         .boxed();
 
     // Define each component
@@ -146,7 +142,8 @@ pub struct GoDuration {
     pub nanos: i64,
 }
 
-pub fn go_duration_parser<'a>() -> impl Parser<'a, &'a str, GoDuration> {
+pub fn go_duration_parser<'a>() -> impl Parser<'a, &'a str, GoDuration, extra::Err<Rich<'a, char>>>
+{
     // Order matters: longer literal units first
     let unit = choice((
         just("ns").to(1),
@@ -171,19 +168,15 @@ pub fn go_duration_parser<'a>() -> impl Parser<'a, &'a str, GoDuration> {
 }
 
 pub fn parse_iso_date(input: &str) -> ParseResult<Date, Rich<char>> {
-    iso_date_parser().parse(input).map_err(|errs| errs.into_iter().map(|e| e.map(|c| c)).collect())
+    iso_date_parser().parse(input)
 }
 
 pub fn parse_iso_duration(input: &str) -> ParseResult<IsoDuration, Rich<char>> {
-    iso_duration_parser()
-        .parse(input)
-        .map_err(|errs| errs.into_iter().map(|e| e.map(|c| c)).collect())
+    iso_duration_parser().parse(input)
 }
 
 pub fn parse_go_duration(input: &str) -> ParseResult<GoDuration, Rich<char>> {
-    go_duration_parser()
-        .parse(input)
-        .map_err(|errs| errs.into_iter().map(|e| e.map(|c| c)).collect())
+    go_duration_parser().parse(input)
 }
 
 #[cfg(test)]
@@ -332,8 +325,8 @@ mod tests {
     fn test_iso_date_invalid_length() {
         let input = "2024020"; // 7 digits instead of 8
         let res = parse_iso_date(input);
-        assert!(res.is_err());
-        let errors = res.unwrap_err();
+        assert!(res.has_errors());
+        let errors = res.into_errors();
         assert!(!errors.is_empty());
         // Expect that the parser failed where an 8th digit was missing.
         assert_eq!(errors[0].span().start, input.len());
@@ -347,11 +340,11 @@ mod tests {
         let input = "2024/02/04"; // wrong delimiter instead of '-' at positions 4 and 7
         let res = parse_iso_date(input);
         assert!(
-            res.is_err(),
+            res.has_errors(),
             "Expected parse_iso_date({:?}) to fail due to invalid format, but got Ok",
             input
         );
-        let errors = res.unwrap_err();
+        let errors = res.into_errors();
         assert!(!errors.is_empty());
         // Expect an error indicating that '-' was expected.
         let reason_str = format!("{:?}", errors[0].reason());
@@ -376,11 +369,11 @@ mod tests {
         let input = "20A40204"; // non-digit character in the date
         let res = parse_iso_date(input);
         assert!(
-            res.is_err(),
+            res.has_errors(),
             "Expected parse_iso_date({:?}) to fail due to an invalid character, but got Ok",
             input
         );
-        let errors = res.unwrap_err();
+        let errors = res.into_errors();
         assert!(!errors.is_empty());
         // Expect an error message mentioning a digit (or "Invalid year"/"Invalid month"/"Invalid day")
         let reason_str = format!("{:?}", errors[0].reason()).to_lowercase();
@@ -397,11 +390,11 @@ mod tests {
         let input = "1Y2M3DT4H5M6.789S"; // missing leading 'P'
         let res = parse_iso_duration(input);
         assert!(
-            res.is_err(),
+            res.has_errors(),
             "Expected parse_iso_duration({:?}) to fail due to missing prefix 'P', but got Ok",
             input
         );
-        let errors = res.unwrap_err();
+        let errors = res.into_errors();
         assert!(!errors.is_empty());
         // Expect an error indicating that the literal 'P' was expected at position 0.
         let reason_str = format!("{:?}", errors[0].reason());
@@ -424,11 +417,11 @@ mod tests {
         let input = "P1X"; // After the digit, the expected token is 'Y' (or one of Y, M, D)
         let res = parse_iso_duration(input);
         assert!(
-            res.is_err(),
+            res.has_errors(),
             "Expected parse_iso_duration({:?}) to fail due to an invalid token, but got Ok",
             input
         );
-        let errors = res.unwrap_err();
+        let errors = res.into_errors();
         assert!(!errors.is_empty());
         // Expect an error mentioning the expected token (e.g. "Y")
         let reason_str = format!("{:?}", errors[0].reason());
@@ -455,11 +448,11 @@ mod tests {
         let input = "P1Y2M3DT4H5M6.789"; // missing trailing 'S' for seconds
         let res = parse_iso_duration(input);
         assert!(
-            res.is_err(),
+            res.has_errors(),
             "Expected parse_iso_duration({:?}) to fail due to missing 'S' at the end, but got Ok",
             input
         );
-        let errors = res.unwrap_err();
+        let errors = res.into_errors();
         assert!(!errors.is_empty());
         // Expect an error mentioning that 'S' is missing.
         let reason_str = format!("{:?}", errors[0].reason());
@@ -483,11 +476,11 @@ mod tests {
         let input = "2h5"; // '2h' is valid, but '5' lacks the trailing valid unit
         let res = parse_go_duration(input);
         assert!(
-            res.is_err(),
+            res.has_errors(),
             "Expected parse_go_duration({:?}) to fail when unit is missing, but got Ok",
             input
         );
-        let errors = res.unwrap_err();
+        let errors = res.into_errors();
         assert!(!errors.is_empty());
         // Expect an error message regarding a missing unit marker.
         let reason_str = format!("{:?}", errors[0].reason());
@@ -518,7 +511,7 @@ mod tests {
                     if i == 4 || i == 7 { c == '-' } else { c.is_ascii_digit() }
                 })));
             let res = parse_iso_date(&input);
-            prop_assert!(res.is_err());
+            prop_assert!(res.has_errors());
         }
     }
 
@@ -528,8 +521,8 @@ mod tests {
             // A valid iso duration must start with 'P' and contain at least one digit.
             prop_assume!(!(input.starts_with("P") && input.chars().any(|c| c.is_ascii_digit())));
             let res = parse_iso_duration(&input);
-            prop_assert!(res.is_err());
-            let errors = res.unwrap_err();
+            prop_assert!(res.has_errors());
+            let errors = res.into_errors();
             prop_assert!(!errors.is_empty());
         }
     }
@@ -541,8 +534,8 @@ mod tests {
             prop_assume!(!valid_units.contains(&unit.as_str()));
             let input = format!("{}{}", num, unit);
             let res = parse_go_duration(&input);
-            prop_assert!(res.is_err(), "Expected parse_go_duration({:?}) to fail for invalid unit, but got Ok", input);
-            let errors = res.unwrap_err();
+            prop_assert!(res.has_errors(), "Expected parse_go_duration({:?}) to fail for invalid unit, but got Ok", input);
+            let errors = res.into_errors();
             prop_assert!(!errors.is_empty(), "Expected errors to be non-empty for invalid go duration input: {:?}", input);
         }
     }
