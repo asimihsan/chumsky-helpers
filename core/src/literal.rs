@@ -331,6 +331,52 @@ mod tests {
         assert_eq!(parser.parse(input).into_result(), Ok(expected));
     }
 
+    #[test]
+    fn test_single_quoted_with_escapes() {
+        let parser = LiteralParserBuilder::new().single_quote(true).build();
+        let input = r#"'hello\'\\\n\r\tworld'"#;
+        let expected = Expr::LiteralStr(("hello'\\\n\r\tworld".to_string(), (0..22).into()));
+        assert_eq!(parser.parse(input).into_result(), Ok(expected));
+    }
+
+    #[test]
+    fn test_all_escape_sequences() {
+        let parser = LiteralParserBuilder::new().build();
+        // Test all escape sequences in double-quoted strings
+        let input = r#""\\\/\"\n\r\t""#;
+        let expected = Expr::LiteralStr(("\\/\"\n\r\t".to_string(), (0..14).into()));
+        assert_eq!(parser.parse(input).into_result(), Ok(expected));
+    }
+
+    #[test]
+    fn test_mixed_literal_types() {
+        let parser = LiteralParserBuilder::new().single_quote(true).raw_string(true).build();
+
+        // Test all types of literals sequentially
+        let test_cases = [
+            (
+                "42",
+                Expr::LiteralNum((NumberValue::Integer(42), (0..2).into())),
+            ),
+            (
+                r#""double""#,
+                Expr::LiteralStr(("double".to_string(), (0..8).into())),
+            ),
+            (
+                r#"'single'"#,
+                Expr::LiteralStr(("single".to_string(), (0..8).into())),
+            ),
+            (
+                r#"`raw`"#,
+                Expr::LiteralStr(("raw".to_string(), (0..5).into())),
+            ),
+        ];
+
+        for (input, expected) in test_cases {
+            assert_eq!(parser.parse(input).into_result(), Ok(expected));
+        }
+    }
+
     // Property-based tests for numeric literals.
     proptest! {
         #[test]
