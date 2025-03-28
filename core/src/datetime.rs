@@ -5,8 +5,6 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
-use chumsky::error::LabelError;
-use chumsky::error::Simple;
 use chumsky::prelude::*;
 use std::convert::TryFrom;
 use time::{Date, Month};
@@ -17,13 +15,17 @@ fn number<'a>(digits: usize) -> impl Parser<'a, &'a str, String> {
         .repeated()
         .exactly(digits)
         .to_slice()
-        .from_str()
-        .unwrapped()
+        .map(|s: &str| s.to_string())
         .labelled(format!("{}-digit number", digits))
 }
 
 fn any_number<'a>() -> impl Parser<'a, &'a str, String> {
-    text::digits(10).repeated().at_least(1).to_slice().from_str().unwrapped().labelled("number")
+    text::digits(10)
+        .repeated()
+        .at_least(1)
+        .to_slice()
+        .map(|s: &str| s.to_string())
+        .labelled("number")
 }
 
 // Parser for a decimal number (integer and optional fractional part)
@@ -36,46 +38,43 @@ fn decimal_number<'a>() -> impl Parser<'a, &'a str, f64> {
         } else {
             i
         };
-        num_str.parse::<f64>().map_err(|_| {
-            Simple::merge_expected_found(vec!["Invalid number".to_string()], None, span)
-        })
+        num_str.parse::<f64>().map_err(|_| EmptyErr)
     })
 }
 
 pub fn iso_date_parser<'a>() -> impl Parser<'a, &'a str, Date> {
-    // Basic: YYYYMMDD
     let basic = number(8).try_map(|s: String, span| {
-        let year =
-            s[0..4].parse::<i32>().map_err(|_| Simple::custom(span.clone(), "Invalid year"))?;
-        let month: u8 =
-            s[4..6].parse().map_err(|_| Simple::custom(span.clone(), "Invalid month"))?;
-        let day: u8 = s[6..8].parse().map_err(|_| Simple::custom(span.clone(), "Invalid day"))?;
-        Ok((year, month, day))
+        let year = Ok(s[0..4].parse::<i32>().map_err(|_| Rich::custom(span, "Invalid year"))?);
+        let month: u8 = Ok(s[4..6].parse().map_err(|_| Rich::custom(span, "Invalid month"))?);
+        let day: u8 = Ok(s[6..8].parse().map_err(|_| Rich::custom(span, "Invalid day"))?);
+        Ok((year?, month?, day?))
     });
 
-    // Extended: YYYY-MM-DD
     let extended = number(4)
         .then_ignore(just('-').labelled("expected '-'"))
         .then(number(2))
         .then_ignore(just('-').labelled("expected '-'"))
         .then(number(2))
         .try_map(|((year_str, month_str), day_str), span| {
-            let year = year_str
-                .parse::<i32>()
-                .map_err(|_| Simple::expected_found(vec!["Invalid year"], None, span.clone()))?;
-            let month: u8 = month_str
-                .parse()
-                .map_err(|_| Simple::expected_found(vec!["Invalid month"], None, span.clone()))?;
-            let day: u8 = day_str
-                .parse()
-                .map_err(|_| Simple::expected_found(vec!["Invalid day"], None, span.clone()))?;
-            Ok((year, month, day))
+            let year =
+                Ok(year_str.parse::<i32>().map_err(|_| Rich::custom(span, "Invalid year"))?);
+            let month: u8 =
+                Ok(month_str.parse().map_err(|_| Rich::custom(span, "Invalid month"))?);
+            let day: u8 = Ok(day_str.parse().map_err(|_| Rich::custom(span, "Invalid day"))?);
+            Ok((year?, month?, day?))
         });
 
-    basic.or(extended).map(|(year, month, day)| {
-        let m = Month::try_from(month).expect("Invalid month value");
-        Date::from_calendar_date(year, m, day).expect("Invalid date")
-    })
+    basic
+        .or(extended)
+        .try_map(|(year, month, day), span| {
+            Ok(Month::try_from(month)
+                .map_err(|_| Rich::custom(span, "Invalid month value"))
+                .and_then(|m| {
+                    Date::from_calendar_date(year, m, day)
+                        .map_err(|_| Rich::custom(span, "Invalid date"))
+                })?)
+        })
+        .boxed()
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -92,8 +91,7 @@ pub fn iso_duration_parser<'a>() -> impl Parser<'a, &'a str, IsoDuration> {
     // Parser for an integer value
     let int_val = any_number()
         .try_map(|s, span| {
-            s.parse::<i32>()
-                .map_err(|_| Simple::expected(span, vec!["Invalid integer".to_string()]))
+            Ok(s.parse::<i32>().map_err(|_| Rich::custom(span, "Invalid integer"))?)
         })
         .boxed();
 
@@ -113,8 +111,10 @@ pub fn iso_duration_parser<'a>() -> impl Parser<'a, &'a str, IsoDuration> {
     let time_period = just('T')
         .ignore_then(hour_part.or_not().then(minute_part.or_not()).then(second_part.or_not()));
 
-    just('P').labelled("expected P").ignore_then(date_period.then(time_period.or_not())).try_map(
-        |(((y, m), d), t_opt), span| {
+    just('P')
+        .labelled("expected P")
+        .ignore_then(date_period.then(time_period.or_not()))
+        .try_map(|(((y, m), d), t_opt), span| {
             let years = y.flatten();
             let months = m.flatten();
             let days = d.flatten();
@@ -130,15 +130,15 @@ pub fn iso_duration_parser<'a>() -> impl Parser<'a, &'a str, IsoDuration> {
                 && minutes.is_none()
                 && seconds.is_none()
             {
-                Err(Simple::custom(
+                Ok(Err(Rich::custom(
                     span,
                     "Expected at least one duration component after 'P'",
-                ))
+                ))?)
             } else {
                 Ok(IsoDuration { years, months, days, hours, minutes, seconds })
             }
-        },
-    )
+        })
+        .boxed()
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -164,20 +164,26 @@ pub fn go_duration_parser<'a>() -> impl Parser<'a, &'a str, GoDuration> {
     component
         .repeated()
         .at_least(1)
-        .then(end())
-        .map(|(parts, _)| GoDuration { nanos: parts.into_iter().sum() })
+        .collect::<Vec<_>>() // Collect into Vec before summing
+        .map(|parts| GoDuration { nanos: parts.iter().sum() })
+        .then_ignore(end())
+        .boxed()
 }
 
-pub fn parse_iso_date(input: &str) -> chumsky::prelude::ParseResult<Date, Simple<char>> {
-    iso_date_parser().parse(input)
+pub fn parse_iso_date(input: &str) -> ParseResult<Date, Rich<char>> {
+    iso_date_parser().parse(input).map_err(|errs| errs.into_iter().map(|e| e.map(|c| c)).collect())
 }
 
-pub fn parse_iso_duration(input: &str) -> chumsky::prelude::ParseResult<IsoDuration, Simple<char>> {
-    iso_duration_parser().parse(input)
+pub fn parse_iso_duration(input: &str) -> ParseResult<IsoDuration, Rich<char>> {
+    iso_duration_parser()
+        .parse(input)
+        .map_err(|errs| errs.into_iter().map(|e| e.map(|c| c)).collect())
 }
 
-pub fn parse_go_duration(input: &str) -> chumsky::prelude::ParseResult<GoDuration, Simple<char>> {
-    go_duration_parser().parse(input)
+pub fn parse_go_duration(input: &str) -> ParseResult<GoDuration, Rich<char>> {
+    go_duration_parser()
+        .parse(input)
+        .map_err(|errs| errs.into_iter().map(|e| e.map(|c| c)).collect())
 }
 
 #[cfg(test)]

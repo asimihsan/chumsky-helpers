@@ -7,9 +7,6 @@
 
 use crate::number::{NumberParserBuilder, NumberValue};
 use crate::Spanned;
-use chumsky::error::LabelError;
-use chumsky::error::LabelError;
-use chumsky::error::Simple;
 use chumsky::prelude::*;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -40,17 +37,17 @@ impl LiteralParserBuilder {
         self
     }
 
-    pub fn build<'a>(self) -> impl Parser<'a, &'a str, Expr> {
+    pub fn build<'a>(self) -> impl Parser<'a, &'a str, extra::Err<Rich<'a, Expr>>> {
         // Number parser with span
         let number = NumberParserBuilder::new()
             .negative(true)
             .float(true)
             .scientific(true)
             .build()
-            .map_with(|n, span| Expr::LiteralNum(Spanned(n, span.clone())));
+            .map_with(|n, e| Expr::LiteralNum((n, e.span())));
 
         // Double-quoted strings with span
-        let normal_dq = none_of("\\\"").map(|c| c.to_string());
+        let normal_dq = none_of("\\\"").map(|c: char| c.to_string());
         let escaped_dq = just("\\")
             .ignore_then(choice((
                 just("\\").to("\\"),
@@ -61,40 +58,34 @@ impl LiteralParserBuilder {
                 just("t").to("\t"),
             )))
             .map(|s: &str| s.to_string());
+
         let dq_content =
             choice((normal_dq, escaped_dq)).repeated().collect::<Vec<String>>().map(|v| v.concat());
+
         let double_quoted = just("\"")
             .ignore_then(dq_content)
-            .then_ignore(
-                just('"').or_not().try_map(|opt_quote, span| match opt_quote {
-                    Some(_) => Ok(()),
-                    None => Err(Simple::merge_expected_found(
-                        vec!["Unclosed double quote".to_string()],
-                        None,
-                        span,
-                    )),
-                }),
-            )
-            .map_with(|s, span| Expr::LiteralStr(Spanned(s, span)));
+            .then_ignore(just('"').or_not().try_map(|opt_quote, span| {
+                opt_quote.ok_or_else(|| Rich::custom(span, "Unclosed double quote"))
+            }))
+            .map_with(|s, e| Expr::LiteralStr((s, e.span())));
 
-        // Raw string parser – always attempt to parse, then decide allowed vs. disallowed.
+        // Raw string parser
         let raw_string = just("`")
             .ignore_then(none_of("`").repeated().collect::<String>())
             .then_ignore(just("`"))
-            .map_with(move |s, span| {
+            .map_with(move |s, e| {
                 if self.allow_raw_string {
-                    Expr::LiteralStr((s, span))
+                    Expr::LiteralStr((s, e.span()))
                 } else {
-                    Expr::Error(("raw string literals are not allowed".to_string(), span))
+                    Expr::Error(("raw string literals are not allowed".to_string(), e.span()))
                 }
-            })
-            .boxed();
+            });
 
-        // Single-quoted string parser – always attempt to parse.
+        // Single-quoted string parser
         let single_quoted = just("'")
             .ignore_then(
                 choice((
-                    none_of("\\'").map(|c| c.to_string()),
+                    none_of("\\'").map(|c: char| c.to_string()),
                     just("\\")
                         .ignore_then(choice((
                             just("\\").to("\\"),
@@ -106,36 +97,29 @@ impl LiteralParserBuilder {
                         .map(|s: &str| s.to_string()),
                 ))
                 .repeated()
-                .map(|v: Vec<String>| v.concat()),
+                .collect::<Vec<_>>()
+                .map(|v| v.concat()),
             )
             .then_ignore(just('\''))
-            .map_with_span(move |s, span| {
+            .map_with(move |s, e| {
                 if self.allow_single_quote {
-                    Expr::LiteralStr((s, span))
+                    Expr::LiteralStr((s, e.span()))
                 } else {
                     Expr::Error((
                         "single-quoted string literals are not allowed".to_string(),
-                        span,
+                        e.span(),
                     ))
                 }
-            })
-            .boxed();
+            });
 
-        let choices = vec![
-            number.boxed(),
-            double_quoted.boxed(),
-            raw_string,
-            single_quoted,
-        ];
-
-        choice(choices).boxed()
+        choice((number, double_quoted, raw_string, single_quoted)).boxed()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chumsky::error::SimpleReason;
+    use crate::Spanned;
     use chumsky::Parser;
     use proptest::prelude::*;
 
