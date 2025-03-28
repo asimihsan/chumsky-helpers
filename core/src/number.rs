@@ -10,20 +10,43 @@ use chumsky::{error::Rich, prelude::*};
 #[derive(Debug, Clone, PartialEq)]
 pub enum NumberValue {
     Integer(i64),
-    Float(f64),
+    Float { value: f64, base: String, decimal: Option<String>, exponent: Option<(Sign, String)> },
 }
 
 impl NumberValue {
     pub fn as_f64(&self) -> f64 {
         match self {
             NumberValue::Integer(i) => *i as f64,
-            NumberValue::Float(f) => *f,
+            NumberValue::Float { value, .. } => *value,
+        }
+    }
+
+    pub fn base(&self) -> &str {
+        match self {
+            NumberValue::Integer(_) => "", // Integer doesn't have separate base
+            NumberValue::Float { base, .. } => base,
+        }
+    }
+
+    pub fn decimal(&self) -> Option<&str> {
+        match self {
+            NumberValue::Integer(_) => None,
+            NumberValue::Float { decimal, .. } => decimal.as_deref(),
+        }
+    }
+
+    pub fn exponent(&self) -> Option<(Sign, &str)> {
+        match self {
+            NumberValue::Integer(_) => None,
+            NumberValue::Float { exponent, .. } => {
+                exponent.as_ref().map(|(sign, exp)| (*sign, exp.as_str()))
+            }
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum Sign {
+pub enum Sign {
     Positive,
     Negative,
     None,
@@ -131,7 +154,19 @@ impl NumberParserBuilder {
                         int
                     }))
                 } else {
-                    Ok(NumberValue::Float(num_str.parse::<f64>().unwrap()))
+                    let base_str = int.to_string();
+                    let decimal_str = dec.as_ref().and_then(|d| d.as_ref()).map(|s| s.to_string());
+                    let exponent_data = exp
+                        .as_ref()
+                        .and_then(|e| e.as_ref())
+                        .map(|(exp_sign, exp_str)| (*exp_sign, exp_str.to_string()));
+
+                    Ok(NumberValue::Float {
+                        value: num_str.parse::<f64>().unwrap(),
+                        base: base_str,
+                        decimal: decimal_str,
+                        exponent: exponent_data,
+                    })
                 }
             },
         )
@@ -164,17 +199,31 @@ mod tests {
     #[test]
     fn test_float() {
         let parser = NumberParserBuilder::new().float(true).negative(true).build();
-        assert_eq!(
-            parser.parse("42.0").into_result(),
-            Ok(NumberValue::Float(42.0))
-        );
+        let result = parser.parse("42.0").into_result().unwrap();
+        match result {
+            NumberValue::Float { value, base, decimal, exponent } => {
+                assert_eq!(value, 42.0);
+                assert_eq!(base, "42");
+                assert_eq!(decimal, Some("0".to_string()));
+                assert_eq!(exponent, None);
+            }
+            _ => panic!("Expected Float variant"),
+        }
     }
 
     #[test]
     fn test_scientific() {
         let parser = NumberParserBuilder::new().scientific(true).negative(true).build();
-        let result = parser.parse("42e0").into_result().map(|n| n.as_f64());
-        assert_eq!(result, Ok(42.0));
+        let result = parser.parse("42e0").into_result().unwrap();
+        match result {
+            NumberValue::Float { value, base, decimal, exponent } => {
+                assert_eq!(value, 42.0);
+                assert_eq!(base, "42");
+                assert_eq!(decimal, None);
+                assert_eq!(exponent, Some((Sign::None, "0".to_string())));
+            }
+            _ => panic!("Expected Float variant"),
+        }
     }
 
     #[test]
@@ -198,27 +247,53 @@ mod tests {
     #[test]
     fn test_float_with_no_decimal() {
         let parser = NumberParserBuilder::new().float(true).negative(true).build();
-        let result = parser.parse("42.").into_result().map(|n| n.as_f64());
-        assert_eq!(result, Ok(42.0));
+        let result = parser.parse("42.").into_result().unwrap();
+        match result {
+            NumberValue::Float { value, base, decimal, exponent } => {
+                assert_eq!(value, 42.0);
+                assert_eq!(base, "42");
+                assert_eq!(decimal, Some("".to_string()));
+                assert_eq!(exponent, None);
+            }
+            _ => panic!("Expected Float variant"),
+        }
     }
 
     #[test]
     fn test_scientific_with_positive_exp() {
         let parser = NumberParserBuilder::new().scientific(true).build();
-        let result = parser.parse("42e+2").into_result().map(|n| n.as_f64());
-        assert_eq!(result, Ok(4200.0));
+        let result = parser.parse("42e+2").into_result().unwrap();
+        match result {
+            NumberValue::Float { value, base, decimal, exponent } => {
+                assert_eq!(value, 4200.0);
+                assert_eq!(base, "42");
+                assert_eq!(decimal, None);
+                assert_eq!(exponent, Some((Sign::Positive, "2".to_string())));
+            }
+            _ => panic!("Expected Float variant"),
+        }
     }
 
     #[test]
     fn test_combined_float_scientific() {
         let parser = NumberParserBuilder::new().float(true).scientific(true).negative(true).build();
-        let result = parser.parse("-42.5e-1").into_result().map(|n| n.as_f64());
-        assert_eq!(result, Ok(-4.25));
+        let result = parser.parse("-42.5e-1").into_result().unwrap();
+        match result {
+            NumberValue::Float { value, base, decimal, exponent } => {
+                assert_eq!(value, -4.25);
+                assert_eq!(base, "42");
+                assert_eq!(decimal, Some("5".to_string()));
+                assert_eq!(exponent, Some((Sign::Negative, "1".to_string())));
+            }
+            _ => panic!("Expected Float variant"),
+        }
     }
 
     #[test]
     fn test_exponent_variations() {
         let parser = NumberParserBuilder::new().scientific(true).build();
+
+        // Just check values with as_f64() for brevity in these variations
         assert_eq!(
             parser.parse("1e0").into_result().map(|n| n.as_f64()),
             Ok(1.0)
@@ -244,6 +319,20 @@ mod tests {
     #[test]
     fn test_explicit_positive_variations() {
         let parser = NumberParserBuilder::new().scientific(true).negative(true).float(true).build();
+
+        // Check components for one case
+        let result = parser.parse("+1.5e+1").into_result().unwrap();
+        match result {
+            NumberValue::Float { value, base, decimal, exponent } => {
+                assert_eq!(value, 15.0);
+                assert_eq!(base, "1");
+                assert_eq!(decimal, Some("5".to_string()));
+                assert_eq!(exponent, Some((Sign::Positive, "1".to_string())));
+            }
+            _ => panic!("Expected Float variant"),
+        }
+
+        // Just check values with as_f64() for the rest
         assert_eq!(
             parser.parse("+1").into_result().map(|n| n.as_f64()),
             Ok(1.0)
@@ -256,10 +345,64 @@ mod tests {
             parser.parse("+1e+1").into_result().map(|n| n.as_f64()),
             Ok(10.0)
         );
-        assert_eq!(
-            parser.parse("+1.5e+1").into_result().map(|n| n.as_f64()),
-            Ok(15.0)
-        );
+    }
+
+    #[test]
+    fn test_component_preservation() {
+        let parser = NumberParserBuilder::new().float(true).scientific(true).negative(true).build();
+
+        // Test with a complex number with all components
+        let test_cases = [
+            (
+                "123.456e-7",
+                "123",
+                Some("456".to_string()),
+                Some((Sign::Negative, "7".to_string())),
+                123.456e-7,
+            ),
+            (
+                "-987.654E+3",
+                "987",
+                Some("654".to_string()),
+                Some((Sign::Positive, "3".to_string())),
+                -987.654e3,
+            ),
+            ("42.", "42", Some("".to_string()), None, 42.0),
+            ("0.123", "0", Some("123".to_string()), None, 0.123),
+        ];
+
+        for (input, expected_base, expected_decimal, expected_exponent, expected_value) in
+            test_cases
+        {
+            let result = parser.parse(input).into_result().unwrap();
+            match result {
+                NumberValue::Float { value, base, decimal, exponent } => {
+                    assert!(
+                        (value - expected_value).abs() < 1e-10,
+                        "For input {}, expected value {} but got {}",
+                        input,
+                        expected_value,
+                        value
+                    );
+                    assert_eq!(
+                        base, expected_base,
+                        "For input {}, expected base {} but got {}",
+                        input, expected_base, base
+                    );
+                    assert_eq!(
+                        decimal, expected_decimal,
+                        "For input {}, expected decimal {:?} but got {:?}",
+                        input, expected_decimal, decimal
+                    );
+                    assert_eq!(
+                        exponent, expected_exponent,
+                        "For input {}, expected exponent {:?} but got {:?}",
+                        input, expected_exponent, exponent
+                    );
+                }
+                _ => panic!("Expected Float variant for input {}", input),
+            }
+        }
     }
 
     proptest! {
@@ -277,6 +420,17 @@ mod tests {
             let expected = input.parse::<f64>().unwrap();
             let parsed = parser.parse(&input).into_result().unwrap().as_f64();
             let rel_error = if expected != 0.0 { (parsed - expected).abs() / expected.abs() } else { (parsed - expected).abs() };
+
+            // Also verify components are correctly stored
+            match parser.parse(&input).into_result().unwrap() {
+                NumberValue::Float { value, .. } => {
+                    // Just check the value is approximately correct
+                    let value_error = if expected != 0.0 { (value - expected).abs() / expected.abs() } else { (value - expected).abs() };
+                    prop_assert!(value_error < 1e-10);
+                },
+                _ => prop_assert!(false, "Expected Float variant"),
+            }
+
             prop_assert!(rel_error < 1e-10, "Parsed: {}, Expected: {}, Relative Error: {}", parsed, expected, rel_error);
         }
 
