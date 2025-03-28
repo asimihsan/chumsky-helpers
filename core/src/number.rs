@@ -65,7 +65,10 @@ impl NumberParserBuilder {
     pub fn build<'a>(self) -> impl Parser<'a, &'a str, NumberValue, extra::Err<Rich<'a, char>>> {
         let digits = text::int(10);
         let integer = digits.map(|s: &str| s.parse::<i64>().unwrap());
-        let decimal = just('.').ignore_then(text::digits(10).to_slice()).map(Some).or_not();
+        let decimal = just('.')
+            .ignore_then(text::digits(10).to_slice().or_not().map(|opt| opt.unwrap_or("")))
+            .map(Some)
+            .or_not();
         let exponent = choice((just('e'), just('E')))
             .ignore_then(Self::sign_parser().then(text::int(10)))
             .map(Some)

@@ -5,19 +5,15 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
+use chumsky::combinator::Repeated;
+use chumsky::error::LabelError;
+use chumsky::extra::ParserExtra;
+use chumsky::input::StrInput;
+use chumsky::text::{Char, TextExpected};
+use chumsky::util::MaybeRef;
 use chumsky::{error::Rich, prelude::*};
 use std::convert::TryFrom;
 use time::{Date, Month};
-
-// Parser for one or more digits
-fn number<'a>(digits: usize) -> impl Parser<'a, &'a str, String, extra::Err<Rich<'a, char>>> {
-    text::digits(10)
-        .repeated()
-        .exactly(digits)
-        .to_slice()
-        .map(|s: &str| s.to_string())
-        .labelled(format!("{}-digit number", digits))
-}
 
 fn any_number<'a>() -> impl Parser<'a, &'a str, String, extra::Err<Rich<'a, char>>> {
     text::digits(10)
@@ -42,25 +38,69 @@ fn decimal_number<'a>() -> impl Parser<'a, &'a str, f64, extra::Err<Rich<'a, cha
     })
 }
 
-pub fn iso_date_parser<'a>() -> impl Parser<'a, &'a str, Date, extra::Err<Rich<'a, char>>> {
-    let basic = number(8).try_map(|s: String, span| {
-        let year = s[0..4].parse::<i32>().map_err(|_| Rich::custom(span, "Invalid year"))?;
-        let month = s[4..6].parse::<u8>().map_err(|_| Rich::custom(span, "Invalid month"))?;
-        let day = s[6..8].parse::<u8>().map_err(|_| Rich::custom(span, "Invalid day"))?;
-        Ok((year, month, day))
-    });
+fn exactly_digits<'src, I, E>(
+    length: usize,
+) -> Repeated<impl Parser<'src, I, <I as Input<'src>>::Token, E> + Copy, I::Token, I, E>
+where
+    I: StrInput<'src>,
+    I::Token: Char + 'src,
+    E: ParserExtra<'src, I>,
+    E::Error: LabelError<'src, I, TextExpected<'src, I>>,
+{
+    any()
+        .try_map(move |c: I::Token, span| {
+            if c.is_digit(10) {
+                Ok(c)
+            } else {
+                Err(LabelError::expected_found(
+                    [TextExpected::Digit(0..10)],
+                    Some(MaybeRef::Val(c)),
+                    span,
+                ))
+            }
+        })
+        .repeated()
+        .exactly(length)
+}
 
-    let extended = number(4)
-        .then_ignore(just('-').labelled("expected '-'"))
-        .then(number(2))
-        .then_ignore(just('-').labelled("expected '-'"))
-        .then(number(2))
-        .try_map(|((year_str, month_str), day_str), span| {
-            let year = year_str.parse::<i32>().map_err(|_| Rich::custom(span, "Invalid year"))?;
-            let month = month_str.parse::<u8>().map_err(|_| Rich::custom(span, "Invalid month"))?;
-            let day = day_str.parse::<u8>().map_err(|_| Rich::custom(span, "Invalid day"))?;
-            Ok((year, month, day))
-        });
+pub fn iso_date_parser<'a>() -> impl Parser<'a, &'a str, Date, extra::Err<Rich<'a, char>>> {
+    let year_digits = exactly_digits(4).to_slice();
+    let month_digits = exactly_digits(2).to_slice();
+    let day_digits = exactly_digits(2).to_slice();
+
+    // Basic ISO date format: YYYYMMDD (8 digits)
+    let basic = year_digits
+        .then(month_digits)
+        .then(day_digits)
+        .try_map(
+            |((year_str, month_str), day_str): ((&str, &str), &str), span| {
+                let year =
+                    year_str.parse::<i32>().map_err(|_| Rich::custom(span, "Invalid year"))?;
+                let month =
+                    month_str.parse::<u8>().map_err(|_| Rich::custom(span, "Invalid month"))?;
+                let day = day_str.parse::<u8>().map_err(|_| Rich::custom(span, "Invalid day"))?;
+                Ok((year, month, day))
+            },
+        )
+        .then_ignore(end());
+
+    // Extended ISO date format: YYYY-MM-DD
+    let extended = year_digits
+        .then_ignore(just('-'))
+        .then(month_digits)
+        .then_ignore(just('-'))
+        .then(day_digits)
+        .then_ignore(end())
+        .try_map(
+            |((year_str, month_str), day_str): ((&str, &str), &str), span| {
+                let year =
+                    year_str.parse::<i32>().map_err(|_| Rich::custom(span, "Invalid year"))?;
+                let month =
+                    month_str.parse::<u8>().map_err(|_| Rich::custom(span, "Invalid month"))?;
+                let day = day_str.parse::<u8>().map_err(|_| Rich::custom(span, "Invalid day"))?;
+                Ok((year, month, day))
+            },
+        );
 
     basic
         .or(extended)
