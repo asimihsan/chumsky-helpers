@@ -128,4 +128,4 @@ pub type Span = SimpleSpan;
 pub type Spanned<T> = (T, Span);
 
 // Re-export the public API
-pub use expr::{Error, EvalResult};
+pub use expr::Error;
