@@ -13,13 +13,16 @@ use chumsky::prelude::*;
 pub enum Error {
     #[error("Parse error: {0}")]
     ParseError(String),
+
+    #[error("Evaluation error: {0}")]
+    EvaluationError(String),
 }
 
-/// An expression type for our calculator
+/// An expression type for our calculator with arbitrary precision arithmetic
 #[allow(unused)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
-    /// A numeric literal value
+    /// A numeric literal value with arbitrary precision
     Number(NumberValue),
 
     /// Addition operation (a + b)
@@ -61,10 +64,10 @@ pub fn parse(input: &str) -> Result<Expr, Error> {
 fn parser<'a>() -> impl Parser<'a, &'a str, Expr, extra::Err<Rich<'a, char>>> {
     // Use recursive parsing to handle nested expressions
     recursive(|expr| {
-        // Number parser that supports integers, floats, and scientific notation
+        // Number parser that supports integers, rationals, and scientific notation
         let make_number = NumberParserBuilder::new()
             .negative(true)
-            .float(true)
+            .rational(true)
             .scientific(true)
             .build()
             .map(Expr::Number)
@@ -74,18 +77,27 @@ fn parser<'a>() -> impl Parser<'a, &'a str, Expr, extra::Err<Rich<'a, char>>> {
 
         let op = |c| just(c).padded();
 
+        // Unary negation has highest precedence
         let unary = op('-').repeated().foldr(atom, |_op, rhs| Expr::Neg(Box::new(rhs)));
 
-        let product = unary.clone().foldl(
+        // Power has next highest precedence
+        let power = unary.clone().foldl(
+            op('^').to(Expr::Pow as fn(_, _) -> _).then(unary).repeated(),
+            |lhs, (op, rhs)| op(Box::new(lhs), Box::new(rhs)),
+        );
+
+        // Product has middle precedence
+        let product = power.clone().foldl(
             choice((
                 op('*').to(Expr::Mul as fn(_, _) -> _),
                 op('/').to(Expr::Div as fn(_, _) -> _),
             ))
-            .then(unary)
+            .then(power)
             .repeated(),
             |lhs, (op, rhs)| op(Box::new(lhs), Box::new(rhs)),
         );
 
+        // Sum has lowest precedence
         product.clone().foldl(
             choice((
                 op('+').to(Expr::Add as fn(_, _) -> _),
@@ -101,67 +113,32 @@ fn parser<'a>() -> impl Parser<'a, &'a str, Expr, extra::Err<Rich<'a, char>>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::number::NumberValue;
-
-    // Helper function to create expressions for testing
-    fn make_expr(op: fn(Box<Expr>, Box<Expr>) -> Expr, left: i64, right: i64) -> Expr {
-        op(
-            Box::new(Expr::Number(NumberValue::Integer(left))),
-            Box::new(Expr::Number(NumberValue::Integer(right))),
-        )
-    }
-
-    fn make_float_expr(op: fn(Box<Expr>, Box<Expr>) -> Expr, left: f64, right: f64) -> Expr {
-        op(
-            Box::new(Expr::Number(NumberValue::Float {
-                value: left,
-                base: left.to_string().split('.').next().unwrap().to_string(),
-                decimal: left.to_string().split('.').nth(1).map(|s| s.to_string()),
-                exponent: None,
-            })),
-            Box::new(Expr::Number(NumberValue::Float {
-                value: right,
-                base: right.to_string().split('.').next().unwrap().to_string(),
-                decimal: right.to_string().split('.').nth(1).map(|s| s.to_string()),
-                exponent: None,
-            })),
-        )
-    }
-
-    #[allow(unused)]
-    fn make_mixed_expr(op: fn(Box<Expr>, Box<Expr>) -> Expr, left: i64, right: f64) -> Expr {
-        op(
-            Box::new(Expr::Number(NumberValue::Integer(left))),
-            Box::new(Expr::Number(NumberValue::Float {
-                value: right,
-                base: right.to_string().split('.').next().unwrap().to_string(),
-                decimal: right.to_string().split('.').nth(1).map(|s| s.to_string()),
-                exponent: None,
-            })),
-        )
-    }
-
-    fn make_neg_expr(value: i64) -> Expr {
-        Expr::Neg(Box::new(Expr::Number(NumberValue::Integer(value))))
-    }
-
-    #[allow(unused)]
-    fn make_neg_float_expr(value: f64) -> Expr {
-        Expr::Neg(Box::new(Expr::Number(NumberValue::Float {
-            value,
-            base: value.to_string().split('.').next().unwrap().to_string(),
-            decimal: value.to_string().split('.').nth(1).map(|s| s.to_string()),
-            exponent: None,
-        })))
-    }
+    use crate::number::Sign;
+    use num_bigint::BigInt;
+    use num_rational::BigRational;
 
     #[test]
     fn test_parse_integers() {
         let expr = parse("1+2").unwrap();
         match expr {
             Expr::Add(left, right) => {
-                assert_eq!(*left, make_expr(Expr::Add, 1, 2));
-                assert_eq!(*right, make_expr(Expr::Add, 1, 2));
+                // Check left operand
+                match &*left {
+                    Expr::Number(num) => {
+                        assert!(num.is_integer(), "Left operand should be an integer");
+                        assert_eq!(num.to_integer(), BigInt::from(1));
+                    }
+                    _ => panic!("Expected Number node for left child"),
+                }
+
+                // Check right operand
+                match &*right {
+                    Expr::Number(num) => {
+                        assert!(num.is_integer(), "Right operand should be an integer");
+                        assert_eq!(num.to_integer(), BigInt::from(2));
+                    }
+                    _ => panic!("Expected Number node for right child"),
+                }
             }
             _ => panic!("Expected Add node at root"),
         }
@@ -169,8 +146,23 @@ mod tests {
         let expr = parse("3-4").unwrap();
         match expr {
             Expr::Sub(left, right) => {
-                assert_eq!(*left, make_expr(Expr::Sub, 3, 4));
-                assert_eq!(*right, make_expr(Expr::Sub, 3, 4));
+                // Check left operand
+                match &*left {
+                    Expr::Number(num) => {
+                        assert!(num.is_integer(), "Left operand should be an integer");
+                        assert_eq!(num.to_integer(), BigInt::from(3));
+                    }
+                    _ => panic!("Expected Number node for left child"),
+                }
+
+                // Check right operand
+                match &*right {
+                    Expr::Number(num) => {
+                        assert!(num.is_integer(), "Right operand should be an integer");
+                        assert_eq!(num.to_integer(), BigInt::from(4));
+                    }
+                    _ => panic!("Expected Number node for right child"),
+                }
             }
             _ => panic!("Expected Sub node at root"),
         }
@@ -178,8 +170,23 @@ mod tests {
         let expr = parse("5*6").unwrap();
         match expr {
             Expr::Mul(left, right) => {
-                assert_eq!(*left, make_expr(Expr::Mul, 5, 6));
-                assert_eq!(*right, make_expr(Expr::Mul, 5, 6));
+                // Check left operand
+                match &*left {
+                    Expr::Number(num) => {
+                        assert!(num.is_integer(), "Left operand should be an integer");
+                        assert_eq!(num.to_integer(), BigInt::from(5));
+                    }
+                    _ => panic!("Expected Number node for left child"),
+                }
+
+                // Check right operand
+                match &*right {
+                    Expr::Number(num) => {
+                        assert!(num.is_integer(), "Right operand should be an integer");
+                        assert_eq!(num.to_integer(), BigInt::from(6));
+                    }
+                    _ => panic!("Expected Number node for right child"),
+                }
             }
             _ => panic!("Expected Mul node at root"),
         }
@@ -187,8 +194,23 @@ mod tests {
         let expr = parse("7/8").unwrap();
         match expr {
             Expr::Div(left, right) => {
-                assert_eq!(*left, make_expr(Expr::Div, 7, 8));
-                assert_eq!(*right, make_expr(Expr::Div, 7, 8));
+                // Check left operand
+                match &*left {
+                    Expr::Number(num) => {
+                        assert!(num.is_integer(), "Left operand should be an integer");
+                        assert_eq!(num.to_integer(), BigInt::from(7));
+                    }
+                    _ => panic!("Expected Number node for left child"),
+                }
+
+                // Check right operand
+                match &*right {
+                    Expr::Number(num) => {
+                        assert!(num.is_integer(), "Right operand should be an integer");
+                        assert_eq!(num.to_integer(), BigInt::from(8));
+                    }
+                    _ => panic!("Expected Number node for right child"),
+                }
             }
             _ => panic!("Expected Div node at root"),
         }
@@ -196,36 +218,74 @@ mod tests {
         let expr = parse("9^10").unwrap();
         match expr {
             Expr::Pow(left, right) => {
-                assert_eq!(*left, make_expr(Expr::Pow, 9, 10));
-                assert_eq!(*right, make_expr(Expr::Pow, 9, 10));
+                // Check left operand
+                match &*left {
+                    Expr::Number(num) => {
+                        assert!(num.is_integer(), "Left operand should be an integer");
+                        assert_eq!(num.to_integer(), BigInt::from(9));
+                    }
+                    _ => panic!("Expected Number node for left child"),
+                }
+
+                // Check right operand
+                match &*right {
+                    Expr::Number(num) => {
+                        assert!(num.is_integer(), "Right operand should be an integer");
+                        assert_eq!(num.to_integer(), BigInt::from(10));
+                    }
+                    _ => panic!("Expected Number node for right child"),
+                }
             }
             _ => panic!("Expected Pow node at root"),
         }
 
         let expr = parse("-11").unwrap();
         match expr {
-            Expr::Neg(inner) => {
-                assert_eq!(*inner, make_neg_expr(11));
-            }
+            Expr::Neg(inner) => match *inner {
+                Expr::Number(num) => {
+                    assert!(num.is_integer(), "Operand should be an integer");
+                    assert_eq!(num.to_integer(), BigInt::from(11));
+                }
+                _ => panic!("Expected Number node for inner expression"),
+            },
             _ => panic!("Expected Neg node at root"),
         }
 
         let expr = parse("-(12)").unwrap();
         match expr {
-            Expr::Neg(inner) => {
-                assert_eq!(*inner, make_neg_expr(12));
-            }
+            Expr::Neg(inner) => match *inner {
+                Expr::Number(num) => {
+                    assert!(num.is_integer(), "Operand should be an integer");
+                    assert_eq!(num.to_integer(), BigInt::from(12));
+                }
+                _ => panic!("Expected Number node for inner expression"),
+            },
             _ => panic!("Expected Neg node at root"),
         }
     }
 
     #[test]
-    fn test_parse_floats() {
+    fn test_parse_rationals() {
         let expr = parse("1.5+2.5").unwrap();
         match expr {
             Expr::Add(left, right) => {
-                assert_eq!(*left, make_float_expr(Expr::Add, 1.5, 2.5));
-                assert_eq!(*right, make_float_expr(Expr::Add, 1.5, 2.5));
+                // Check left operand
+                match &*left {
+                    Expr::Number(num) => {
+                        let expected_left = BigRational::new(BigInt::from(15), BigInt::from(10));
+                        assert_eq!(num.as_rational(), &expected_left);
+                    }
+                    _ => panic!("Expected Number node for left child"),
+                }
+
+                // Check right operand
+                match &*right {
+                    Expr::Number(num) => {
+                        let expected_right = BigRational::new(BigInt::from(25), BigInt::from(10));
+                        assert_eq!(num.as_rational(), &expected_right);
+                    }
+                    _ => panic!("Expected Number node for right child"),
+                }
             }
             _ => panic!("Expected Add node at root"),
         }
@@ -236,8 +296,37 @@ mod tests {
         let expr = parse("1.5e2+2.5e3").unwrap();
         match expr {
             Expr::Add(left, right) => {
-                assert_eq!(*left, make_float_expr(Expr::Add, 1.5e2, 2.5e3));
-                assert_eq!(*right, make_float_expr(Expr::Add, 1.5e2, 2.5e3));
+                // Check left operand
+                match &*left {
+                    Expr::Number(num) => {
+                        // 1.5e2 = 150
+                        let expected_left = BigRational::new(BigInt::from(150), BigInt::from(1));
+                        assert_eq!(num.as_rational(), &expected_left);
+
+                        // Also verify exponent component
+                        let exp = num.exponent().unwrap();
+                        assert_eq!(exp.sign, Sign::None);
+                        assert_eq!(exp.value, "2");
+                        assert_eq!(exp.case, 'e');
+                    }
+                    _ => panic!("Expected Number node for left child"),
+                }
+
+                // Check right operand
+                match &*right {
+                    Expr::Number(num) => {
+                        // 2.5e3 = 2500
+                        let expected_right = BigRational::new(BigInt::from(2500), BigInt::from(1));
+                        assert_eq!(num.as_rational(), &expected_right);
+
+                        // Also verify exponent component
+                        let exp = num.exponent().unwrap();
+                        assert_eq!(exp.case, 'e');
+                        assert_eq!(exp.sign, Sign::None);
+                        assert_eq!(exp.value, "3");
+                    }
+                    _ => panic!("Expected Number node for right child"),
+                }
             }
             _ => panic!("Expected Add node at root"),
         }
@@ -258,21 +347,15 @@ mod tests {
             Expr::Add(left, right) => {
                 match *left {
                     Expr::Number(n) => {
-                        if let NumberValue::Integer(i) = n {
-                            assert_eq!(i, 1);
-                        } else {
-                            panic!("Expected Integer variant");
-                        }
+                        assert!(n.is_integer(), "Left operand should be an integer");
+                        assert_eq!(n.to_integer(), BigInt::from(1));
                     }
                     _ => panic!("Expected Number node for left child"),
                 }
                 match *right {
                     Expr::Number(n) => {
-                        if let NumberValue::Integer(i) = n {
-                            assert_eq!(i, 2);
-                        } else {
-                            panic!("Expected Integer variant");
-                        }
+                        assert!(n.is_integer(), "Right operand should be an integer");
+                        assert_eq!(n.to_integer(), BigInt::from(2));
                     }
                     _ => panic!("Expected Number node for right child"),
                 }

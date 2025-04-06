@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "mcp-language-server-rust": {
+      "type": "stdio",
+      "command": "go",
+      "args": [
+        "run",
+        "github.com/isaacphi/mcp-language-server@latest",
+        "--workspace",
+        "/Users/asimi/workplace/chumsky_helpers",
+        "--lsp",
+        "/Users/asimi/.cargo/bin/rust-analyzer"
+      ],
+      "env": {}
+    }
+  }
+}

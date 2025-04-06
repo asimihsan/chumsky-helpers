@@ -29,23 +29,23 @@
 //! use chumsky_helpers::number::{NumberParserBuilder, NumberValue};
 //! use chumsky::prelude::*;
 //!
-//! // Create a parser for numbers that allows negative values, floats, and scientific notation
+//! // Create a parser for numbers that allows negative values, rationals, and scientific notation
 //! let parser = NumberParserBuilder::new()
 //!     .negative(true)
-//!     .float(true)
+//!     .rational(true)
 //!     .scientific(true)
 //!     .build();
 //!
 //! // Parse a number and access both the calculated value and original components
 //! let result = parser.parse("123.456e-7").into_result().unwrap();
 //! match result {
-//!     NumberValue::Float { value, base, decimal, exponent } => {
+//!     NumberValue::Rational { value, base, decimal, exponent } => {
 //!         println!("Value: {}", value);
 //!         println!("Base: {}", base);
 //!         println!("Decimal part: {:?}", decimal);
 //!         println!("Exponent: {:?}", exponent);
 //!     },
-//!     _ => panic!("Expected Float variant"),
+//!     _ => panic!("Expected Rational variant"),
 //! }
 //! ```
 //!
@@ -87,34 +87,36 @@
 //! let raw_string = parser.parse("`raw string`").into_result().unwrap();
 //! ```
 //!
-//! ## High-Precision Number Handling
+//! ## Arbitrary-Precision Number Handling
 //!
-//! The number parser preserves the original components of parsed numbers, allowing for
-//! high-precision operations that might be lost in floating-point representation:
+//! The number parser uses arbitrary precision types for numeric values and preserves
+//! the original components of parsed numbers:
 //!
 //! ```rust
 //! use chumsky_helpers::number::{NumberParserBuilder, NumberValue};
 //! use chumsky::prelude::*;
 //!
 //! let parser = NumberParserBuilder::new()
-//!     .float(true)
+//!     .rational(true)
 //!     .scientific(true)
 //!     .negative(true)
 //!     .build();
 //!
 //! let result = parser.parse("123.456789012345678901234567890e-10").into_result().unwrap();
 //! match result {
-//!     NumberValue::Float { value: _, base, decimal, exponent } => {
-//!         // Access original string components for arbitrary precision arithmetic
+//!     NumberValue::Rational { value, base, decimal, exponent } => {
+//!         // Access original string components and arbitrary precision value
+//!         println!("Value: {}", value);
 //!         println!("Base: {}", base);
 //!         println!("Decimal: {:?}", decimal);
 //!         println!("Exponent: {:?}", exponent);
 //!     },
-//!     _ => panic!("Expected Float variant"),
+//!     _ => panic!("Expected Rational variant"),
 //! }
 //! ```
 
 pub mod datetime;
+pub mod eval;
 pub mod expr;
 pub mod literal;
 pub mod number;
@@ -128,4 +130,5 @@ pub type Span = SimpleSpan;
 pub type Spanned<T> = (T, Span);
 
 // Re-export the public API
+pub use eval::Evaluate;
 pub use expr::Error;
