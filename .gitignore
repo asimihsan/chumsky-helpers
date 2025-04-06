@@ -23,3 +23,4 @@ Cargo.lock
 .devbox
 .jj
 .aider*
+vendor
