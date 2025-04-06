@@ -115,7 +115,7 @@
 //! ```
 
 pub mod datetime;
-mod expr;
+pub mod expr;
 pub mod literal;
 pub mod number;
 
