@@ -126,3 +126,6 @@ pub type Span = SimpleSpan;
 
 /// A type representing a value along with its position in the source text.
 pub type Spanned<T> = (T, Span);
+
+// Re-export the public API
+pub use expr::{Error, EvalResult};
