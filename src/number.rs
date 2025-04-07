@@ -35,10 +35,8 @@
 //!     .negative(true)
 //!     .build();
 //!
-//! assert_eq!(
-//!     parser.parse("42").into_result(),
-//!     Ok(NumberValue::Integer(BigInt::from(42)))
-//! );
+//! let expected = NumberValue::new_integer(42, false);
+//! assert_eq!(parser.parse("42").into_result(), Ok(expected));
 //! ```
 //!
 //! Parsing rational numbers with component preservation:
@@ -57,21 +55,22 @@
 //!     .build();
 //!
 //! let result = parser.parse("-123.456e+7").into_result().unwrap();
-//! match result {
-//!     NumberValue::Rational { value, base, decimal, exponent } => {
-//!         // -123.456e+7 = -1234560000
-//!         let expected_value = BigRational::from_str("-1234560000").unwrap();
-//!         assert_eq!(value, expected_value);
-//!         assert_eq!(base, "123");
-//!         assert_eq!(decimal, Some("456".to_string()));
-//!         assert_eq!(exponent, Some((Sign::Positive, "7".to_string())));
-//!     },
-//!     _ => panic!("Expected Rational variant"),
-//! }
+//!
+//! // -123.456e+7 = -1234560000
+//! let expected_value = BigRational::from_str("-1234560000").unwrap();
+//! assert_eq!(result.to_rational(), expected_value);
+//! assert_eq!(result.base(), "123");
+//! assert_eq!(result.decimal(), Some("456"));
+//! assert!(result.exponent().is_some());
+//! let exp = result.exponent().unwrap();
+//! assert_eq!(exp.sign, Sign::Positive);
+//! assert_eq!(exp.value, "7");
+//! assert_eq!(exp.case, 'e');
+//! assert!(exp.explicit_sign);
 //! ```
 
 use chumsky::{error::Rich, prelude::*};
-use num::One;
+use num::{One, Signed};
 use num_bigint::BigInt;
 use num_rational::BigRational;
 use std::str::FromStr;
@@ -93,12 +92,21 @@ pub struct NumberValue {
 /// Describes how a number should be formatted for display.
 #[derive(Debug, Clone, PartialEq)]
 pub enum NumberFormat {
-    /// An integer with its string representation.
-    Integer(String),
+    /// An integer with its string representation and sign information.
+    Integer {
+        /// Whether the sign was explicitly given in the source (e.g., "+42" vs "42")
+        explicit_sign: bool,
+
+        /// The base digits without sign.
+        digits: String,
+    },
 
     /// A decimal number with preserved components.
     Decimal {
-        /// The base component (digits before the decimal point).
+        /// Whether the sign was explicitly given in the source (e.g., "+42.5" vs "42.5")
+        explicit_sign: bool,
+
+        /// The base component (digits before the decimal point), without sign.
         base: String,
 
         /// The decimal component (digits after the decimal point).
@@ -117,10 +125,24 @@ pub enum NumberFormat {
 impl std::fmt::Display for NumberValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.format {
-            NumberFormat::Integer(s) => {
-                write!(f, "{}", s)
+            NumberFormat::Integer { explicit_sign, digits } => {
+                // Write sign if negative or explicitly positive
+                if self.value.is_negative() {
+                    write!(f, "-{}", digits)
+                } else if *explicit_sign {
+                    write!(f, "+{}", digits)
+                } else {
+                    write!(f, "{}", digits)
+                }
             }
-            NumberFormat::Decimal { base, decimal, exponent } => {
+            NumberFormat::Decimal { explicit_sign, base, decimal, exponent } => {
+                // Write sign if negative or explicitly positive
+                if self.value.is_negative() {
+                    write!(f, "-")?;
+                } else if *explicit_sign {
+                    write!(f, "+")?;
+                }
+
                 // Write the base part
                 write!(f, "{}", base)?;
 
@@ -134,11 +156,11 @@ impl std::fmt::Display for NumberValue {
                     // Write the exponent marker with correct case
                     write!(f, "{}", exp.case)?;
 
-                    // Write the sign if any
-                    match exp.sign {
-                        Sign::Positive => write!(f, "+")?,
-                        Sign::Negative => write!(f, "-")?,
-                        Sign::None => {}
+                    // Write the sign if negative or explicitly positive
+                    if exp.sign == Sign::Negative {
+                        write!(f, "-")?;
+                    } else if exp.sign == Sign::Positive || exp.explicit_sign {
+                        write!(f, "+")?;
                     }
 
                     // Write the exponent value
@@ -160,33 +182,41 @@ impl std::fmt::Display for NumberValue {
 }
 
 impl NumberValue {
-    /// Creates a new integer value.
-    pub fn new_integer<T: Into<BigInt>>(value: T) -> Self {
+    /// Creates a new integer value with explicit sign information.
+    pub fn new_integer<T: Into<BigInt>>(value: T, explicit_sign: bool) -> Self {
         let int_value = value.into();
-        let str_value = int_value.to_string();
+        let digits = int_value.abs().to_string();
+
         NumberValue {
             value: BigRational::from_integer(int_value),
-            format: NumberFormat::Integer(str_value),
+            format: NumberFormat::Integer { explicit_sign, digits },
         }
     }
 
     /// Creates a new rational value from components.
     pub fn new_rational(
         value: BigRational,
+        explicit_sign: bool,
         base: String,
         decimal: Option<String>,
         exponent: Option<Exponent>,
     ) -> Self {
-        NumberValue { value, format: NumberFormat::Decimal { base, decimal, exponent } }
+        NumberValue {
+            value,
+            format: NumberFormat::Decimal { explicit_sign, base, decimal, exponent },
+        }
     }
 
     /// Creates a computed value from an operation result.
     pub fn new_computed(value: BigRational) -> Self {
         // Normalize to Integer format if result is an integer
         if value.denom() == &BigInt::one() {
+            let int_value = value.numer();
+            let digits = int_value.abs().to_string();
+
             NumberValue {
                 value: value.clone(),
-                format: NumberFormat::Integer(value.numer().to_string()),
+                format: NumberFormat::Integer { explicit_sign: false, digits },
             }
         } else {
             NumberValue { value, format: NumberFormat::Computed }
@@ -195,7 +225,7 @@ impl NumberValue {
 
     /// Checks if the value was parsed as an integer.
     pub fn is_integer(&self) -> bool {
-        matches!(self.format, NumberFormat::Integer(_))
+        matches!(self.format, NumberFormat::Integer { .. })
     }
 
     /// Checks if the value was parsed as a rational.
@@ -204,6 +234,11 @@ impl NumberValue {
             self.format,
             NumberFormat::Decimal { .. } | NumberFormat::Computed
         )
+    }
+
+    /// Checks if the value is mathematically negative.
+    pub fn is_negative(&self) -> bool {
+        self.value.is_negative()
     }
 
     /// Converts the number to an f64 value.
@@ -219,7 +254,7 @@ impl NumberValue {
     /// Returns the base component of the number (digits before the decimal point).
     pub fn base(&self) -> &str {
         match &self.format {
-            NumberFormat::Integer(s) => s,
+            NumberFormat::Integer { digits, .. } => digits,
             NumberFormat::Decimal { base, .. } => base,
             NumberFormat::Computed => "",
         }
@@ -228,7 +263,7 @@ impl NumberValue {
     /// Returns the decimal component of the number (digits after the decimal point), if any.
     pub fn decimal(&self) -> Option<&str> {
         match &self.format {
-            NumberFormat::Integer(_) => None,
+            NumberFormat::Integer { .. } => None,
             NumberFormat::Decimal { decimal, .. } => decimal.as_deref(),
             NumberFormat::Computed => None,
         }
@@ -237,9 +272,18 @@ impl NumberValue {
     /// Returns the exponent component of the number, if any.
     pub fn exponent(&self) -> Option<&Exponent> {
         match &self.format {
-            NumberFormat::Integer(_) => None,
+            NumberFormat::Integer { .. } => None,
             NumberFormat::Decimal { exponent, .. } => exponent.as_ref(),
             NumberFormat::Computed => None,
+        }
+    }
+
+    /// Returns whether the sign was explicitly given in the source.
+    pub fn has_explicit_sign(&self) -> bool {
+        match &self.format {
+            NumberFormat::Integer { explicit_sign, .. } => *explicit_sign,
+            NumberFormat::Decimal { explicit_sign, .. } => *explicit_sign,
+            NumberFormat::Computed => false,
         }
     }
 
@@ -256,128 +300,6 @@ impl NumberValue {
     /// Gets a reference to the underlying BigRational value.
     pub fn as_rational(&self) -> &BigRational {
         &self.value
-    }
-
-    /// Parses a string into a NumberValue.
-    ///
-    /// This function can handle integers, decimal numbers, and scientific notation.
-    /// It returns None if parsing fails.
-    ///
-    /// Note: This method doesn't implement FromStr trait to avoid confusion with the standard
-    /// trait method. Use this method directly instead.
-    #[allow(clippy::should_implement_trait)]
-    pub fn from_str(s: &str) -> Option<Self> {
-        // First try to parse as a simple integer
-        if let Ok(i) = BigInt::from_str(s) {
-            return Some(NumberValue::new_integer(i));
-        }
-
-        // Parse as a rational number (may include decimal point and/or scientific notation)
-        let mut parts = s.split(&['e', 'E'][..]);
-        let base_part = parts.next()?;
-        let exp_part = parts.next();
-
-        let (sign, mantissa) = if let Some(stripped) = base_part.strip_prefix('-') {
-            (Sign::Negative, stripped)
-        } else if let Some(stripped) = base_part.strip_prefix('+') {
-            (Sign::Positive, stripped)
-        } else {
-            (Sign::None, base_part)
-        };
-
-        let mantissa_parts: Vec<&str> = mantissa.split('.').collect();
-        let base = mantissa_parts.first()?.to_string();
-        let decimal = mantissa_parts.get(1).map(|s| s.to_string());
-
-        // Parse exponent if present
-        let exponent = if let Some(exp) = exp_part {
-            // Determine the exponent marker case ('e' or 'E') from the original string
-            let exp_case = if s.contains('E') { 'E' } else { 'e' };
-
-            let (exp_sign, exp_val) = if let Some(stripped) = exp.strip_prefix('-') {
-                (Sign::Negative, stripped.to_string())
-            } else if let Some(stripped) = exp.strip_prefix('+') {
-                (Sign::Positive, stripped.to_string())
-            } else {
-                (Sign::None, exp.to_string())
-            };
-
-            Some(Exponent { sign: exp_sign, value: exp_val, case: exp_case })
-        } else {
-            None
-        };
-
-        // Construct the rational value
-        let sign_for_display = sign; // Save sign for display purposes
-        let mut rational_str = if sign == Sign::Negative { "-" } else { "" }.to_string();
-        rational_str.push_str(&base);
-
-        if let Some(dec) = &decimal {
-            if !dec.is_empty() {
-                let numerator = format!("{}{}", base, dec);
-                let denominator = format!("1{}", "0".repeat(dec.len()));
-
-                let num = BigInt::from_str(&numerator).ok()?;
-                let denom = BigInt::from_str(&denominator).ok()?;
-                let mut value = BigRational::new(num, denom);
-
-                if sign == Sign::Negative {
-                    value = -value;
-                }
-
-                // Apply exponent if present
-                if let Some(exp) = &exponent {
-                    if let Ok(exp_num) = u32::from_str(&exp.value) {
-                        let factor = BigInt::from(10).pow(exp_num);
-                        match exp.sign {
-                            Sign::Negative => value /= BigRational::from_integer(factor),
-                            _ => value *= BigRational::from_integer(factor),
-                        }
-                    }
-                }
-
-                return Some(NumberValue::new_rational(
-                    value,
-                    if sign_for_display == Sign::Positive {
-                        format!("+{}", base)
-                    } else if sign_for_display == Sign::Negative {
-                        // Use original base without sign for internal format
-                        // The negative sign is already in the value
-                        base.clone()
-                    } else {
-                        base.clone()
-                    },
-                    decimal.clone(),
-                    exponent,
-                ));
-            }
-        }
-
-        // No decimal part, but might have exponent
-        let mut value = BigRational::from_integer(BigInt::from_str(&rational_str).ok()?);
-
-        // Apply exponent if present
-        if let Some(exp) = &exponent {
-            // Parse the exponent value, ignoring any e/E marker
-            if let Ok(exp_num) = u32::from_str(&exp.value) {
-                let factor = BigInt::from(10).pow(exp_num);
-                match exp.sign {
-                    Sign::Negative => value /= BigRational::from_integer(factor),
-                    _ => value *= BigRational::from_integer(factor),
-                }
-            }
-        }
-
-        Some(NumberValue::new_rational(
-            value,
-            if sign_for_display == Sign::Positive {
-                format!("+{}", base)
-            } else {
-                base.clone()
-            },
-            decimal,
-            exponent,
-        ))
     }
 }
 
@@ -400,10 +322,13 @@ pub struct Exponent {
     /// The case of the exponent marker ('e' or 'E')
     pub case: char,
 
+    /// Whether the sign was explicitly given (e.g., "e+10" vs "e10")
+    pub explicit_sign: bool,
+
     /// The sign of the exponent (+, -, or none)
     pub sign: Sign,
 
-    /// The numeric value of the exponent as a string
+    /// The numeric value of the exponent as a string (without sign)
     pub value: String,
 }
 
@@ -463,20 +388,28 @@ impl NumberParserBuilder {
         let digits = text::int(10);
         let decimal = just('.')
             .ignore_then(text::digits(10).to_slice().or_not().map(|opt| opt.unwrap_or("")))
-            .map(Some)
-            .or_not();
+            .or_not(); // Returns Option<&str>
+
         let exponent = choice((just('e').to('e'), just('E').to('E')))
             .then(Self::sign_parser())
             .then(text::int(10).to_slice())
-            .map(|((case, sign), value)| Some(Exponent { case, sign, value: value.to_string() }))
-            .or_not();
+            .map(|((case, sign), value)| {
+                // Track whether sign was explicit
+                let explicit_sign = sign != Sign::None;
+                Exponent { case, explicit_sign, sign, value: value.to_string() }
+            })
+            .or_not(); // Returns Option<Exponent>
 
         let allow_negative = self.allow_negative;
         let allow_rational = self.allow_rational;
         let allow_scientific = self.allow_scientific;
 
+        // Type alias for the complex tuple structure returned by the parser chain
+        type ParsedNumberComponents<'a> = (((Sign, &'a str), Option<&'a str>), Option<Exponent>);
+
         Self::sign_parser().then(digits.to_slice()).then(decimal).then(exponent).try_map(
-            move |(((sign, int_str), dec), exp), span| {
+            move |(((sign, int_str), dec_opt), exp_opt): ParsedNumberComponents, span| {
+                // Validate configuration constraints
                 if matches!(sign, Sign::Negative) && !allow_negative {
                     return Err(Rich::<char, _>::custom(
                         span,
@@ -484,64 +417,101 @@ impl NumberParserBuilder {
                     ));
                 }
 
-                // Start building the full number string
-                let mut num_str = String::new();
-                if sign == Sign::Negative {
-                    num_str.push('-');
-                } else if sign == Sign::Positive {
-                    num_str.push('+');
+                // Extract the actual decimal string if present
+                let decimal_str_opt: Option<String> = dec_opt.map(|s| s.to_string());
+
+                let has_decimal = decimal_str_opt.is_some();
+                if has_decimal && !allow_rational {
+                    return Err(Rich::<char, _>::custom(
+                        span,
+                        "Rational numbers not allowed",
+                    ));
                 }
-                num_str.push_str(int_str);
 
-                // Check for decimal part
-                let has_decimal = if let Some(Some(dec_str)) = dec {
-                    if !allow_rational {
-                        return Err(Rich::<char, _>::custom(
-                            span,
-                            "Rational numbers not allowed",
-                        ));
-                    }
-                    num_str.push('.');
-                    num_str.push_str(dec_str);
-                    true
-                } else {
-                    false
-                };
+                // Exponent is already Option<Exponent>
+                let exponent_opt = exp_opt;
 
-                // Check for exponent part
-                let has_exponent = if let Some(Some(exp)) = exp {
-                    if !allow_scientific {
-                        return Err(Rich::<char, _>::custom(
-                            span,
-                            "Scientific notation not allowed",
-                        ));
-                    }
-                    num_str.push(exp.case);
-                    match exp.sign {
-                        Sign::Negative => num_str.push('-'),
-                        Sign::Positive => num_str.push('+'),
-                        _ => (),
-                    }
-                    num_str.push_str(&exp.value);
-                    true
-                } else {
-                    false
-                };
+                let has_exponent = exponent_opt.is_some();
+                if has_exponent && !allow_scientific {
+                    return Err(Rich::<char, _>::custom(
+                        span,
+                        "Scientific notation not allowed",
+                    ));
+                }
+
+                // Track whether sign was explicit
+                let explicit_sign = sign != Sign::None;
+
+                // Determine if the value is negative
+                let is_negative = sign == Sign::Negative;
 
                 // If it's a simple integer (no decimal, no exponent), use the Integer format
                 if !has_decimal && !has_exponent {
-                    let sign_prefix = if sign == Sign::Negative { "-" } else { "" };
-                    let full_int_str = format!("{}{}", sign_prefix, int_str);
-                    match BigInt::from_str(&full_int_str) {
-                        Ok(value) => Ok(NumberValue::new_integer(value)),
-                        Err(_) => Err(Rich::<char, _>::custom(span, "Failed to parse integer")),
+                    // Parse the integer value
+                    let mut int_value = BigInt::from_str(int_str)
+                        .map_err(|_| Rich::<char, _>::custom(span, "Failed to parse integer"))?;
+
+                    // Apply sign
+                    if is_negative {
+                        int_value = -int_value;
                     }
+
+                    Ok(NumberValue::new_integer(int_value, explicit_sign))
                 } else {
-                    // For more complex numbers, use the from_str method we implemented
-                    match NumberValue::from_str(&num_str) {
-                        Some(value) => Ok(value),
-                        None => Err(Rich::<char, _>::custom(span, "Failed to parse number")),
+                    // Directly calculate rational value for numbers with decimal points or exponents
+                    let base_part = int_str.to_string();
+
+                    // Calculate parts needed for the final value
+                    let mut numerator;
+                    let mut denominator = BigInt::one();
+
+                    if let Some(dec_str) = &decimal_str_opt {
+                        // For numbers with decimal points, we need to calculate the rational value
+                        let combined = format!("{}{}", base_part, dec_str);
+                        numerator = BigInt::from_str(&combined).map_err(|_| {
+                            Rich::<char, _>::custom(span, "Failed to parse number mantissa")
+                        })?;
+
+                        // Set denominator based on decimal length
+                        denominator = BigInt::from(10).pow(dec_str.len() as u32);
+                    } else {
+                        // For numbers without decimal points
+                        numerator = BigInt::from_str(&base_part)
+                            .map_err(|_| Rich::<char, _>::custom(span, "Failed to parse number"))?;
                     }
+
+                    // Apply sign
+                    if is_negative {
+                        numerator = -numerator;
+                    }
+
+                    let mut rational_value = BigRational::new(numerator, denominator);
+
+                    // Apply exponent if present
+                    if let Some(exp_data) = &exponent_opt {
+                        if let Ok(exp_val) = u32::from_str(&exp_data.value) {
+                            let factor = BigInt::from(10).pow(exp_val);
+                            match exp_data.sign {
+                                Sign::Negative => {
+                                    rational_value /= BigRational::from_integer(factor)
+                                }
+                                _ => rational_value *= BigRational::from_integer(factor), // Positive or None
+                            }
+                        } else {
+                            return Err(Rich::<char, _>::custom(
+                                span,
+                                "Failed to parse exponent value",
+                            ));
+                        }
+                    }
+
+                    Ok(NumberValue::new_rational(
+                        rational_value,
+                        explicit_sign,
+                        base_part,
+                        decimal_str_opt,
+                        exponent_opt,
+                    ))
                 }
             },
         )
@@ -558,12 +528,13 @@ mod tests {
     #[test]
     fn test_display_implementation() {
         // Test integer display
-        let int_val = NumberValue::new_integer(42);
+        let int_val = NumberValue::new_integer(42, false);
         assert_eq!(int_val.to_string(), "42");
 
         // Test rational display with original components
         let rational_with_components = NumberValue::new_rational(
             BigRational::new(BigInt::from(1234), BigInt::from(10)),
+            false, /*explicit_sign*/
             "123".to_string(),
             Some("4".to_string()),
             None,
@@ -573,18 +544,30 @@ mod tests {
         // Test with exponent
         let rational_with_exponent = NumberValue::new_rational(
             BigRational::new(BigInt::from(1234560000), BigInt::from(1)),
+            false, /*explicit_sign*/
             "123".to_string(),
             Some("456".to_string()),
-            Some(Exponent { sign: Sign::Positive, value: "7".to_string(), case: 'e' }),
+            Some(Exponent {
+                sign: Sign::Positive,
+                explicit_sign: true,
+                value: "7".to_string(),
+                case: 'e',
+            }),
         );
         assert_eq!(rational_with_exponent.to_string(), "123.456e+7");
 
         // Test negative exponent
         let rational_with_neg_exponent = NumberValue::new_rational(
             BigRational::new(BigInt::from(1234), BigInt::from(100000)),
+            false, /*explicit_sign*/
             "123".to_string(),
             Some("4".to_string()),
-            Some(Exponent { sign: Sign::Negative, value: "5".to_string(), case: 'e' }),
+            Some(Exponent {
+                sign: Sign::Negative,
+                explicit_sign: true,
+                value: "5".to_string(),
+                case: 'e',
+            }),
         );
         assert_eq!(rational_with_neg_exponent.to_string(), "123.4e-5");
 
@@ -599,7 +582,7 @@ mod tests {
         let parser = NumberParserBuilder::new().negative(true).build();
         assert_eq!(
             parser.parse("42").into_result(),
-            Ok(NumberValue::new_integer(42))
+            Ok(NumberValue::new_integer(42, false))
         );
     }
 
@@ -608,7 +591,7 @@ mod tests {
         let parser = NumberParserBuilder::new().negative(true).build();
         assert_eq!(
             parser.parse("-42").into_result(),
-            Ok(NumberValue::new_integer(-42))
+            Ok(NumberValue::new_integer(-42, true))
         );
     }
 
@@ -617,7 +600,7 @@ mod tests {
         let parser = NumberParserBuilder::new().negative(true).build();
         assert_eq!(
             parser.parse("+42").into_result(),
-            Ok(NumberValue::new_integer(-42))
+            Ok(NumberValue::new_integer(42, true))
         );
     }
 
@@ -673,7 +656,12 @@ mod tests {
         assert_eq!(result.decimal(), None);
         assert_eq!(
             result.exponent(),
-            Some(&Exponent { sign: Sign::None, value: "0".to_string(), case: 'e' })
+            Some(&Exponent {
+                sign: Sign::None,
+                explicit_sign: false,
+                value: "0".to_string(),
+                case: 'e'
+            })
         );
         assert_eq!(result.to_integer(), BigInt::from(42));
         assert_eq!(
@@ -736,7 +724,12 @@ mod tests {
         assert_eq!(result.decimal(), None);
         assert_eq!(
             result.exponent(),
-            Some(&Exponent { sign: Sign::Positive, value: "2".to_string(), case: 'e' })
+            Some(&Exponent {
+                sign: Sign::Positive,
+                explicit_sign: true,
+                value: "2".to_string(),
+                case: 'e'
+            })
         );
         assert_eq!(result.to_integer(), BigInt::from(4200));
         assert_eq!(
@@ -761,7 +754,12 @@ mod tests {
         assert_eq!(result.decimal(), Some("5"));
         assert_eq!(
             result.exponent(),
-            Some(&Exponent { sign: Sign::Negative, value: "1".to_string(), case: 'e' })
+            Some(&Exponent {
+                sign: Sign::Negative,
+                explicit_sign: true,
+                value: "1".to_string(),
+                case: 'e'
+            })
         );
         assert_eq!(result.to_integer(), BigInt::from(-4));
         assert_eq!(
@@ -800,7 +798,12 @@ mod tests {
         assert_eq!(result.decimal(), Some("5"));
         assert_eq!(
             result.exponent(),
-            Some(&Exponent { sign: Sign::Positive, value: "1".to_string(), case: 'e' })
+            Some(&Exponent {
+                sign: Sign::Positive,
+                explicit_sign: true,
+                value: "1".to_string(),
+                case: 'e'
+            })
         );
         assert_eq!(result.to_integer(), BigInt::from(15));
         assert_eq!(
@@ -833,8 +836,18 @@ mod tests {
             NumberParserBuilder::new().rational(true).scientific(true).negative(true).build();
 
         // Create exponent values outside the array to avoid temporary value drops
-        let exp_neg = Exponent { sign: Sign::Negative, value: "7".to_string(), case: 'e' };
-        let exp_pos = Exponent { sign: Sign::Positive, value: "3".to_string(), case: 'E' };
+        let exp_neg = Exponent {
+            sign: Sign::Negative,
+            explicit_sign: true,
+            value: "7".to_string(),
+            case: 'e',
+        };
+        let exp_pos = Exponent {
+            sign: Sign::Positive,
+            explicit_sign: true,
+            value: "3".to_string(),
+            case: 'E',
+        };
 
         // Test with a complex number with all components
         let test_cases = [

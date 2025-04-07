@@ -38,15 +38,14 @@
 //!
 //! // Parse a number and access both the calculated value and original components
 //! let result = parser.parse("123.456e-7").into_result().unwrap();
-//! match result {
-//!     NumberValue::Rational { value, base, decimal, exponent } => {
-//!         println!("Value: {}", value);
-//!         println!("Base: {}", base);
-//!         println!("Decimal part: {:?}", decimal);
-//!         println!("Exponent: {:?}", exponent);
-//!     },
-//!     _ => panic!("Expected Rational variant"),
-//! }
+//!
+//! // Access the calculated value
+//! println!("Value: {}", result.to_rational());
+//!
+//! // Access the original components
+//! println!("Base: {}", result.base());
+//! println!("Decimal part: {:?}", result.decimal());
+//! println!("Exponent: {:?}", result.exponent());
 //! ```
 //!
 //! ## Examples
@@ -103,16 +102,12 @@
 //!     .build();
 //!
 //! let result = parser.parse("123.456789012345678901234567890e-10").into_result().unwrap();
-//! match result {
-//!     NumberValue::Rational { value, base, decimal, exponent } => {
-//!         // Access original string components and arbitrary precision value
-//!         println!("Value: {}", value);
-//!         println!("Base: {}", base);
-//!         println!("Decimal: {:?}", decimal);
-//!         println!("Exponent: {:?}", exponent);
-//!     },
-//!     _ => panic!("Expected Rational variant"),
-//! }
+//!
+//! // Access original string components and arbitrary precision value
+//! println!("Value: {}", result.to_rational());
+//! println!("Base: {}", result.base());
+//! println!("Decimal: {:?}", result.decimal());
+//! println!("Exponent: {:?}", result.exponent());
 //! ```
 
 pub mod datetime;

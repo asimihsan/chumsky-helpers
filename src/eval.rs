@@ -93,7 +93,7 @@ impl Evaluate for Expr {
                     if left_rational.is_zero() {
                         return Err(Error::EvaluationError("0^0 is undefined".to_string()));
                     }
-                    return Ok(NumberValue::new_integer(BigInt::one()));
+                    return Ok(NumberValue::new_integer(BigInt::one(), false));
                 }
 
                 let exponent_is_negative = exponent < BigInt::from(0);
@@ -152,9 +152,11 @@ mod tests {
         op(
             Box::new(Expr::Number(NumberValue::new_integer(
                 BigInt::from_str(left).unwrap(),
+                false,
             ))),
             Box::new(Expr::Number(NumberValue::new_integer(
                 BigInt::from_str(right).unwrap(),
+                false,
             ))),
         )
     }
@@ -180,6 +182,7 @@ mod tests {
     fn make_neg_expr(value: &str) -> Expr {
         Expr::Neg(Box::new(Expr::Number(NumberValue::new_integer(
             BigInt::from_str(value).unwrap(),
+            false,
         ))))
     }
 

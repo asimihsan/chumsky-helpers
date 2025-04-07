@@ -229,7 +229,7 @@ mod tests {
     fn test_number_literal() {
         let parser = LiteralParserBuilder::new().build();
         let input = "42";
-        let expected = Expr::LiteralNum((NumberValue::new_integer(42), (0..2).into()));
+        let expected = Expr::LiteralNum((NumberValue::new_integer(42, false), (0..2).into()));
         assert_eq!(parser.parse(input).into_result(), Ok(expected));
     }
 
@@ -444,7 +444,7 @@ mod tests {
         let test_cases = [
             (
                 "42",
-                Expr::LiteralNum((NumberValue::new_integer(42), (0..2).into())),
+                Expr::LiteralNum((NumberValue::new_integer(42, false), (0..2).into())),
             ),
             (
                 r#""double""#,
@@ -471,8 +471,10 @@ mod tests {
         fn prop_numeric_literals(input in (-1000i64..1000).prop_map(|n| n.to_string())) {
             let parser = LiteralParserBuilder::new().build();
             let expected = BigInt::from(input.parse::<i64>().unwrap());
+            // Check if the number has an explicit sign (starts with + or -)
+            let has_explicit_sign = input.starts_with('+') || input.starts_with('-');
             let result = parser.parse(&input).into_result().unwrap();
-            prop_assert_eq!(result, Expr::LiteralNum((NumberValue::new_integer(expected), (0..input.len()).into())));
+            prop_assert_eq!(result, Expr::LiteralNum((NumberValue::new_integer(expected, has_explicit_sign), (0..input.len()).into())));
         }
     }
 
