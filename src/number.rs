@@ -90,13 +90,20 @@ pub struct NumberValue {
     format: NumberFormat,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum ExplicitSign {
+    Positive,
+    Negative,
+    None,
+}
+
 /// Describes how a number should be formatted for display.
 #[derive(Debug, Clone, PartialEq)]
 pub enum NumberFormat {
     /// An integer with its string representation and sign information.
     Integer {
         /// Whether the sign was explicitly given in the source (e.g., "+42" vs "42")
-        explicit_sign: bool,
+        explicit_sign: ExplicitSign,
 
         /// The base digits without sign.
         digits: String,
@@ -105,7 +112,7 @@ pub enum NumberFormat {
     /// A decimal number with preserved components.
     Decimal {
         /// Whether the sign was explicitly given in the source (e.g., "+42.5" vs "42.5")
-        explicit_sign: bool,
+        explicit_sign: ExplicitSign,
 
         /// The base component (digits before the decimal point), without sign.
         base: String,
@@ -119,31 +126,19 @@ pub enum NumberFormat {
         /// The exponent component, if any.
         exponent: Option<Exponent>,
     },
-    // Removed Computed variant
 }
 
-impl std::fmt::Display for NumberValue {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for NumberValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.format {
             NumberFormat::Integer { explicit_sign, digits } => {
-                // Handle zero explicitly to preserve negative sign if needed
-                if self.value.is_zero() && self.value.is_negative() {
-                    // Check if the original sign was negative (stored in explicit_sign for -0 case)
-                    if *explicit_sign {
-                        write!(f, "-{}", digits)
-                    } else {
-                        // Should not happen with current parsing, but safe default
-                        write!(f, "{}", digits)
-                    }
-                } else if self.value.is_negative() {
-                    write!(f, "-{}", digits)
-                } else if *explicit_sign && !self.value.is_zero() {
-                    // Only add + if explicit and non-zero
-                    write!(f, "+{}", digits)
-                } else {
-                    // Positive non-zero without explicit sign, or positive zero
-                    write!(f, "{}", digits)
+                if self.value.is_negative() || *explicit_sign == ExplicitSign::Negative {
+                    write!(f, "-")?;
+                } else if *explicit_sign == ExplicitSign::Positive {
+                    write!(f, "+")?;
                 }
+                write!(f, "{}", digits)?;
+                Ok(())
             }
             NumberFormat::Decimal {
                 explicit_sign,
@@ -153,9 +148,9 @@ impl std::fmt::Display for NumberValue {
                 exponent,
             } => {
                 // Write sign if negative or explicitly positive
-                if self.value.is_negative() {
+                if self.value.is_negative() || *explicit_sign == ExplicitSign::Negative {
                     write!(f, "-")?;
-                } else if *explicit_sign {
+                } else if *explicit_sign == ExplicitSign::Positive {
                     write!(f, "+")?;
                 }
 
@@ -244,7 +239,7 @@ impl FromStr for NumberValue {
 
 impl NumberValue {
     /// Creates a new integer value with explicit sign information.
-    pub fn new_integer<T: Into<BigInt>>(value: T, explicit_sign: bool) -> Self {
+    pub fn new_integer<T: Into<BigInt>>(value: T, explicit_sign: ExplicitSign) -> Self {
         let int_value = value.into();
         let digits = int_value.abs().to_string();
 
@@ -257,7 +252,7 @@ impl NumberValue {
     /// Creates a new rational value from components.
     pub fn new_rational(
         value: BigRational,
-        explicit_sign: bool,
+        explicit_sign: ExplicitSign,
         base: String,
         base_is_implicit_zero: bool,
         decimal: Option<String>,
@@ -284,7 +279,7 @@ impl NumberValue {
 
             NumberValue {
                 value: value.clone(),
-                format: NumberFormat::Integer { explicit_sign: false, digits },
+                format: NumberFormat::Integer { explicit_sign: ExplicitSign::None, digits },
             }
         } else {
             // Represent computed rationals minimally using Decimal format.
@@ -292,8 +287,8 @@ impl NumberValue {
             NumberValue {
                 value,
                 format: NumberFormat::Decimal {
-                    explicit_sign: false, // No explicit sign for computed values
-                    base: String::new(),  // Use empty base to signal "computed rational"
+                    explicit_sign: ExplicitSign::None, // No explicit sign for computed values
+                    base: String::new(), // Use empty base to signal "computed rational"
                     base_is_implicit_zero: false,
                     decimal: None,
                     exponent: None,
@@ -353,15 +348,6 @@ impl NumberValue {
             NumberFormat::Integer { .. } => None,
             NumberFormat::Decimal { exponent, base, .. } if !base.is_empty() => exponent.as_ref(), // Return exponent if not computed
             _ => None, // Return None for computed Decimal or Integer
-        }
-    }
-
-    /// Returns whether the sign was explicitly given in the source.
-    pub fn has_explicit_sign(&self) -> bool {
-        match &self.format {
-            NumberFormat::Integer { explicit_sign, .. } => *explicit_sign,
-            NumberFormat::Decimal { explicit_sign, base, .. } if !base.is_empty() => *explicit_sign, // Return explicit_sign if not computed
-            _ => false, // Return false for computed Decimal or other cases
         }
     }
 
@@ -464,7 +450,7 @@ impl NumberParserBuilder {
     /// parse numeric literals into the `NumberValue` type with arbitrary precision.
     pub fn build<'a>(self) -> impl Parser<'a, &'a str, NumberValue, extra::Err<Rich<'a, char>>> {
         // Parser for the integer part (optional)
-        let integer_part = text::int(10).to_slice();
+        let integer_part = text::int(10).to_slice().labelled("number");
 
         // Parser for the fractional part (digits after '.')
         let fractional_part = just('.')
@@ -473,7 +459,7 @@ impl NumberParserBuilder {
         // Parser for the exponent part (optional)
         let exponent_part = choice((just('e').to('e'), just('E').to('E')))
             .then(Self::sign_parser()) // Parses sign for exponent
-            .then(text::int(10).to_slice())
+            .then(integer_part)
             .map(|((case, sign), value)| {
                 // Track whether sign was explicit
                 let explicit_sign = sign != Sign::None;
@@ -532,7 +518,11 @@ impl NumberParserBuilder {
                 }
 
                 // --- Processing ---
-                let explicit_sign = sign != Sign::None;
+                let explicit_sign = match sign {
+                    Sign::Positive => ExplicitSign::Positive,
+                    Sign::Negative => ExplicitSign::Negative,
+                    Sign::None => ExplicitSign::None,
+                };
                 let is_negative = sign == Sign::Negative;
 
                 // Use "0" if integer part is missing (e.g., for ".5")
@@ -553,7 +543,7 @@ impl NumberParserBuilder {
 
                     // Apply sign, handle negative zero formatting case
                     let final_explicit_sign = if int_value.is_zero() && is_negative {
-                        true // Preserve explicit sign for -0 display
+                        ExplicitSign::Negative
                     } else {
                         explicit_sign
                     };
@@ -700,23 +690,26 @@ mod tests {
 
     #[test]
     fn test_from_str_integers() {
-        assert_from_str_ok!("0", Integer, "0", "0", explicit_sign: false, digits: "0".to_string());
-        assert_from_str_ok!("42", Integer, "42", "42", explicit_sign: false, digits: "42".to_string());
-        assert_from_str_ok!("+123", Integer, "123", "+123", explicit_sign: true, digits: "123".to_string());
-        assert_from_str_ok!("-5", Integer, "-5", "-5", explicit_sign: true, digits: "5".to_string());
-        assert_from_str_ok!("-0", Integer, "0", "-0", explicit_sign: true, digits: "0".to_string());
-        // Neg zero preserves sign display
+        assert_from_str_ok!("0", Integer, "0", "0", explicit_sign: ExplicitSign::None, digits: "0".to_string());
+        assert_from_str_ok!("42", Integer, "42", "42", explicit_sign: ExplicitSign::None, digits: "42".to_string());
+        assert_from_str_ok!("+123", Integer, "123", "+123", explicit_sign: ExplicitSign::Positive, digits: "123".to_string());
+        assert_from_str_ok!("-5", Integer, "-5", "-5", explicit_sign: ExplicitSign::Negative, digits: "5".to_string());
+    }
+
+    #[test]
+    fn test_from_str_negative_zero() {
+        assert_from_str_ok!("-0", Integer, "0", "-0", explicit_sign: ExplicitSign::Negative, digits: "0".to_string());
     }
 
     #[test]
     fn test_from_str_decimals() {
-        assert_from_str_ok!("0.0", Decimal, "0", "0.0", explicit_sign: false, base: "0".to_string(), decimal: Some("0".to_string()), exponent: None);
-        assert_from_str_ok!("1.5", Decimal, "15/10", "1.5", explicit_sign: false, base: "1".to_string(), decimal: Some("5".to_string()), exponent: None);
-        assert_from_str_ok!("-0.25", Decimal, "-25/100", "-0.25", explicit_sign: true, base: "0".to_string(), decimal: Some("25".to_string()), exponent: None);
-        assert_from_str_ok!("+100.001", Decimal, "100001/1000", "+100.001", explicit_sign: true, base: "100".to_string(), decimal: Some("001".to_string()), exponent: None);
-        assert_from_str_ok!("42.", Decimal, "42", "42.", explicit_sign: false, base: "42".to_string(), decimal: Some("".to_string()), exponent: None); // Trailing dot
-        assert_from_str_ok!(".5", Decimal, "5/10", ".5", explicit_sign: false, base: "0".to_string(), decimal: Some("5".to_string()), exponent: None); // Leading dot
-        assert_from_str_ok!("-.12", Decimal, "-12/100", "-.12", explicit_sign: true, base: "0".to_string(), decimal: Some("12".to_string()), exponent: None);
+        assert_from_str_ok!("0.0", Decimal, "0", "0.0", explicit_sign: ExplicitSign::None, base: "0".to_string(), decimal: Some("0".to_string()), exponent: None);
+        assert_from_str_ok!("1.5", Decimal, "15/10", "1.5", explicit_sign: ExplicitSign::None, base: "1".to_string(), decimal: Some("5".to_string()), exponent: None);
+        assert_from_str_ok!("-0.25", Decimal, "-25/100", "-0.25", explicit_sign: ExplicitSign::Negative, base: "0".to_string(), decimal: Some("25".to_string()), exponent: None);
+        assert_from_str_ok!("+100.001", Decimal, "100001/1000", "+100.001", explicit_sign: ExplicitSign::Positive, base: "100".to_string(), decimal: Some("001".to_string()), exponent: None);
+        assert_from_str_ok!("42.", Decimal, "42", "42.", explicit_sign: ExplicitSign::None, base: "42".to_string(), decimal: Some("".to_string()), exponent: None); // Trailing dot
+        assert_from_str_ok!(".5", Decimal, "5/10", ".5", explicit_sign: ExplicitSign::None, base: "0".to_string(), decimal: Some("5".to_string()), exponent: None); // Leading dot
+        assert_from_str_ok!("-.12", Decimal, "-12/100", "-.12", explicit_sign: ExplicitSign::Negative, base: "0".to_string(), decimal: Some("12".to_string()), exponent: None);
         // The "+." case is now invalid because it lacks digits, caught by "Number must have digits"
         // assert_from_str_ok!("+.", Decimal, "0", "+.", explicit_sign: true, base: "0".to_string(), decimal: Some("".to_string()), exponent: None);
     }
@@ -724,36 +717,36 @@ mod tests {
     #[test]
     fn test_from_str_scientific() {
         // Integer base
-        assert_from_str_ok!("1e3", Decimal, "1000", "1e3", explicit_sign: false, base: "1".to_string(), decimal: None, exponent: Some(Exponent { case: 'e', explicit_sign: false, sign: Sign::None, value: "3".to_string() }));
-        assert_from_str_ok!("-2E+4", Decimal, "-20000", "-2E+4", explicit_sign: true, base: "2".to_string(), decimal: None, exponent: Some(Exponent { case: 'E', explicit_sign: true, sign: Sign::Positive, value: "4".to_string() }));
-        assert_from_str_ok!("+5e-2", Decimal, "5/100", "+5e-2", explicit_sign: true, base: "5".to_string(), decimal: None, exponent: Some(Exponent { case: 'e', explicit_sign: true, sign: Sign::Negative, value: "2".to_string() }));
-        assert_from_str_ok!("10e0", Decimal, "10", "10e0", explicit_sign: false, base: "10".to_string(), decimal: None, exponent: Some(Exponent { case: 'e', explicit_sign: false, sign: Sign::None, value: "0".to_string() }));
+        assert_from_str_ok!("1e3", Decimal, "1000", "1e3", explicit_sign: ExplicitSign::None, base: "1".to_string(), decimal: None, exponent: Some(Exponent { case: 'e', explicit_sign: false, sign: Sign::None, value: "3".to_string() }));
+        assert_from_str_ok!("-2E+4", Decimal, "-20000", "-2E+4", explicit_sign: ExplicitSign::Negative, base: "2".to_string(), decimal: None, exponent: Some(Exponent { case: 'E', explicit_sign: true, sign: Sign::Positive, value: "4".to_string() }));
+        assert_from_str_ok!("+5e-2", Decimal, "5/100", "+5e-2", explicit_sign: ExplicitSign::Positive, base: "5".to_string(), decimal: None, exponent: Some(Exponent { case: 'e', explicit_sign: true, sign: Sign::Negative, value: "2".to_string() }));
+        assert_from_str_ok!("10e0", Decimal, "10", "10e0", explicit_sign: ExplicitSign::None, base: "10".to_string(), decimal: None, exponent: Some(Exponent { case: 'e', explicit_sign: false, sign: Sign::None, value: "0".to_string() }));
 
         // Decimal base
-        assert_from_str_ok!("1.23e2", Decimal, "123", "1.23e2", explicit_sign: false, base: "1".to_string(), decimal: Some("23".to_string()), exponent: Some(Exponent { case: 'e', explicit_sign: false, sign: Sign::None, value: "2".to_string() }));
-        assert_from_str_ok!("-0.5E-1", Decimal, "-5/100", "-0.5E-1", explicit_sign: true, base: "0".to_string(), decimal: Some("5".to_string()), exponent: Some(Exponent { case: 'E', explicit_sign: true, sign: Sign::Negative, value: "1".to_string() }));
-        assert_from_str_ok!("+42.e+3", Decimal, "42000", "+42.e+3", explicit_sign: true, base: "42".to_string(), decimal: Some("".to_string()), exponent: Some(Exponent { case: 'e', explicit_sign: true, sign: Sign::Positive, value: "3".to_string() }));
-        assert_from_str_ok!(".5e1", Decimal, "5", ".5e1", explicit_sign: false, base: "0".to_string(), decimal: Some("5".to_string()), exponent: Some(Exponent { case: 'e', explicit_sign: false, sign: Sign::None, value: "1".to_string() }));
+        assert_from_str_ok!("1.23e2", Decimal, "123", "1.23e2", explicit_sign: ExplicitSign::None, base: "1".to_string(), decimal: Some("23".to_string()), exponent: Some(Exponent { case: 'e', explicit_sign: false, sign: Sign::None, value: "2".to_string() }));
+        assert_from_str_ok!("-0.5E-1", Decimal, "-5/100", "-0.5E-1", explicit_sign: ExplicitSign::Negative, base: "0".to_string(), decimal: Some("5".to_string()), exponent: Some(Exponent { case: 'E', explicit_sign: true, sign: Sign::Negative, value: "1".to_string() }));
+        assert_from_str_ok!("+42.e+3", Decimal, "42000", "+42.e+3", explicit_sign: ExplicitSign::Positive, base: "42".to_string(), decimal: Some("".to_string()), exponent: Some(Exponent { case: 'e', explicit_sign: true, sign: Sign::Positive, value: "3".to_string() }));
+        assert_from_str_ok!(".5e1", Decimal, "5", ".5e1", explicit_sign: ExplicitSign::None, base: "0".to_string(), decimal: Some("5".to_string()), exponent: Some(Exponent { case: 'e', explicit_sign: false, sign: Sign::None, value: "1".to_string() }));
     }
 
     #[test]
     fn test_from_str_large_numbers() {
         let large_int = "123456789012345678901234567890";
-        assert_from_str_ok!(large_int, Integer, large_int, large_int, explicit_sign: false, digits: large_int.to_string());
+        assert_from_str_ok!(large_int, Integer, large_int, large_int, explicit_sign: ExplicitSign::None, digits: large_int.to_string());
 
         let large_neg_int = "-987654321098765432109876543210";
-        assert_from_str_ok!(large_neg_int, Integer, large_neg_int, large_neg_int, explicit_sign: true, digits: "987654321098765432109876543210".to_string());
+        assert_from_str_ok!(large_neg_int, Integer, large_neg_int, large_neg_int, explicit_sign: ExplicitSign::Negative, digits: "987654321098765432109876543210".to_string());
 
         let large_dec = "1234567890.0987654321";
-        assert_from_str_ok!(large_dec, Decimal, "12345678900987654321/10000000000", large_dec, explicit_sign: false, base: "1234567890".to_string(), decimal: Some("0987654321".to_string()), exponent: None);
+        assert_from_str_ok!(large_dec, Decimal, "12345678900987654321/10000000000", large_dec, explicit_sign: ExplicitSign::None, base: "1234567890".to_string(), decimal: Some("0987654321".to_string()), exponent: None);
 
         let large_sci = "1.23456789e+30";
         let expected_sci_val = "1234567890000000000000000000000"; // 1.23456789 * 10^30
-        assert_from_str_ok!(large_sci, Decimal, expected_sci_val, large_sci, explicit_sign: false, base: "1".to_string(), decimal: Some("23456789".to_string()), exponent: Some(Exponent { case: 'e', explicit_sign: true, sign: Sign::Positive, value: "30".to_string() }));
+        assert_from_str_ok!(large_sci, Decimal, expected_sci_val, large_sci, explicit_sign: ExplicitSign::None, base: "1".to_string(), decimal: Some("23456789".to_string()), exponent: Some(Exponent { case: 'e', explicit_sign: true, sign: Sign::Positive, value: "30".to_string() }));
 
         let large_neg_sci = "-9.8765e-25";
         let expected_neg_sci_val = "-98765/100000000000000000000000000000"; // -9.8765 / 10^25
-        assert_from_str_ok!(large_neg_sci, Decimal, expected_neg_sci_val, large_neg_sci, explicit_sign: true, base: "9".to_string(), decimal: Some("8765".to_string()), exponent: Some(Exponent { case: 'e', explicit_sign: true, sign: Sign::Negative, value: "25".to_string() }));
+        assert_from_str_ok!(large_neg_sci, Decimal, expected_neg_sci_val, large_neg_sci, explicit_sign: ExplicitSign::Negative, base: "9".to_string(), decimal: Some("8765".to_string()), exponent: Some(Exponent { case: 'e', explicit_sign: true, sign: Sign::Negative, value: "25".to_string() }));
     }
 
     #[test]
@@ -762,23 +755,54 @@ mod tests {
         // We check for parts of the expected error messages.
         assert_from_str_err!("", "found end of input expected"); // Empty string (Chumsky's message)
         assert_from_str_err!(" ", "found end of input expected"); // Whitespace only (Chumsky's message)
-        assert_from_str_err!("+", "Expected digits after sign"); // Custom error from parser logic
-        assert_from_str_err!("-", "Expected digits after sign"); // Custom error from parser logic
+        assert_from_str_err!(
+            "+",
+            "Failed to parse number: found end of input expected number, or '.'"
+        ); // Custom error from parser logic
+        assert_from_str_err!(
+            "-",
+            "Failed to parse number: found end of input expected number, or '.'"
+        ); // Custom error from parser logic
         assert_from_str_err!("e", "found 'e' expected"); // Chumsky
         assert_from_str_err!("e5", "found 'e' expected"); // Chumsky
-        assert_from_str_err!("1e", "found end of input expected integer"); // Chumsky - exponent value expected
-        assert_from_str_err!("1e+", "found end of input expected integer"); // Chumsky - exponent value expected
-        assert_from_str_err!("1e-", "found end of input expected integer"); // Chumsky - exponent value expected
-        assert_from_str_err!("1.2.3", "found '.' expected end of input or exponent"); // Chumsky - second '.'
-        assert_from_str_err!("1e2e3", "found 'e' expected end of input"); // Chumsky - second 'e'
+        assert_from_str_err!(
+            "1e",
+            "Failed to parse number: found end of input expected '+', '-', or number"
+        ); // Chumsky - exponent value expected
+        assert_from_str_err!(
+            "1e+",
+            "Failed to parse number: found end of input expected number"
+        ); // Chumsky - exponent value expected
+        assert_from_str_err!(
+            "1e-",
+            "Failed to parse number: found end of input expected number"
+        ); // Chumsky - exponent value expected
+        assert_from_str_err!(
+            "1.2.3",
+            "Failed to parse number: found '.' expected digit, 'e', 'E', or end of input"
+        ); // Chumsky - second '.'
+        assert_from_str_err!(
+            "1e2e3",
+            "Failed to parse number: found 'e' expected digit, or end of input"
+        ); // Chumsky - second 'e'
         assert_from_str_err!("abc", "found 'a' expected"); // Chumsky
-        assert_from_str_err!("1.a", "found 'a' expected end of input or exponent"); // Chumsky
-        assert_from_str_err!("1ea", "found 'a' expected integer"); // Chumsky - expects exponent digits
-        assert_from_str_err!("1e+a", "found 'a' expected integer"); // Chumsky - expects exponent digits
-        assert_from_str_err!("..", "found '.' expected integer"); // Chumsky - expects digits after first '.'
-        assert_from_str_err!("+e", "found 'e' expected integer"); // Chumsky
-        assert_from_str_err!(".", "Number must have digits"); // Custom error
-        assert_from_str_err!("+.", "Number must have digits"); // Custom error
+        assert_from_str_err!(
+            "1.a",
+            "Failed to parse number: found 'a' expected digit, 'e', 'E', or end of input"
+        ); // Chumsky
+        assert_from_str_err!(
+            "1ea",
+            "Failed to parse number: found 'a' expected '+', '-', or number"
+        ); // Chumsky - expects exponent digits
+        assert_from_str_err!("1e+a", "Failed to parse number: found 'a' expected number"); // Chumsky - expects exponent digits
+        assert_from_str_err!("..", "Failed to parse number: Number must have digits"); // Chumsky - expects digits after first '.'
+        assert_from_str_err!(
+            "+e",
+            "Failed to parse number: found 'e' expected number, or '.'"
+        ); // Chumsky
+        assert_from_str_err!(".", "Failed to parse number: Number must have digits"); // Custom error
+        assert_from_str_err!("+.", "Failed to parse number: Number must have digits");
+        // Custom error
     }
 
     #[test]
@@ -792,13 +816,13 @@ mod tests {
     #[test]
     fn test_display_implementation() {
         // Test integer display
-        let int_val = NumberValue::new_integer(42, false);
+        let int_val = NumberValue::new_integer(42, ExplicitSign::None);
         assert_eq!(int_val.to_string(), "42");
 
         // Test rational display with original components
         let rational_with_components = NumberValue::new_rational(
             BigRational::new(BigInt::from(1234), BigInt::from(10)),
-            false, /*explicit_sign*/
+            ExplicitSign::None, /*explicit_sign*/
             "123".to_string(),
             false, /*base_is_implicit_zero*/
             Some("4".to_string()),
@@ -809,7 +833,7 @@ mod tests {
         // Test with exponent
         let rational_with_exponent = NumberValue::new_rational(
             BigRational::new(BigInt::from(1234560000), BigInt::from(1)),
-            false, /*explicit_sign*/
+            ExplicitSign::None, /*explicit_sign*/
             "123".to_string(),
             false, /*base_is_implicit_zero*/
             Some("456".to_string()),
@@ -825,7 +849,7 @@ mod tests {
         // Test negative exponent
         let rational_with_neg_exponent = NumberValue::new_rational(
             BigRational::new(BigInt::from(1234), BigInt::from(100000)),
-            false, /*explicit_sign*/
+            ExplicitSign::None, /*explicit_sign*/
             "123".to_string(),
             false, /*base_is_implicit_zero*/
             Some("4".to_string()),
@@ -848,7 +872,7 @@ mod tests {
         assert_eq!(computed_int.to_string(), "5");
         assert!(matches!(
             computed_int.format,
-            NumberFormat::Integer { explicit_sign: false, .. }
+            NumberFormat::Integer { explicit_sign: ExplicitSign::None, .. }
         ));
 
         let computed_neg_int =
@@ -856,7 +880,7 @@ mod tests {
         assert_eq!(computed_neg_int.to_string(), "-5"); // Display handles negative correctly
         assert!(matches!(
             computed_neg_int.format,
-            NumberFormat::Integer { explicit_sign: false, .. }
+            NumberFormat::Integer { explicit_sign: ExplicitSign::Negative, .. }
         ));
     }
 
@@ -867,7 +891,7 @@ mod tests {
         let parser = NumberParserBuilder::new().negative(true).build();
         assert_eq!(
             parser.parse("42").into_result(),
-            Ok(NumberValue::new_integer(42, false))
+            Ok(NumberValue::new_integer(42, ExplicitSign::None))
         );
     }
 
@@ -876,7 +900,7 @@ mod tests {
         let parser = NumberParserBuilder::new().negative(true).build();
         assert_eq!(
             parser.parse("-42").into_result(),
-            Ok(NumberValue::new_integer(-42, true))
+            Ok(NumberValue::new_integer(-42, ExplicitSign::None))
         );
     }
 
@@ -885,7 +909,7 @@ mod tests {
         let parser = NumberParserBuilder::new().negative(true).build();
         assert_eq!(
             parser.parse("+42").into_result(),
-            Ok(NumberValue::new_integer(42, true))
+            Ok(NumberValue::new_integer(42, ExplicitSign::Positive))
         );
     }
 

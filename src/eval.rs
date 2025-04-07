@@ -6,7 +6,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use crate::expr::{Error, Expr};
-use crate::number::NumberValue;
+use crate::number::{ExplicitSign, NumberValue};
 use num::{One, Signed, ToPrimitive, Zero};
 use num_bigint::BigInt;
 use num_rational::BigRational;
@@ -93,7 +93,7 @@ impl Evaluate for Expr {
                     if left_rational.is_zero() {
                         return Err(Error::EvaluationError("0^0 is undefined".to_string()));
                     }
-                    return Ok(NumberValue::new_integer(BigInt::one(), false));
+                    return Ok(NumberValue::new_integer(BigInt::one(), ExplicitSign::None));
                 }
 
                 let exponent_is_negative = exponent < BigInt::from(0);
@@ -152,11 +152,11 @@ mod tests {
         op(
             Box::new(Expr::Number(NumberValue::new_integer(
                 BigInt::from_str(left).unwrap(),
-                false,
+                ExplicitSign::None,
             ))),
             Box::new(Expr::Number(NumberValue::new_integer(
                 BigInt::from_str(right).unwrap(),
-                false,
+                ExplicitSign::None,
             ))),
         )
     }
@@ -182,7 +182,7 @@ mod tests {
     fn make_neg_expr(value: &str) -> Expr {
         Expr::Neg(Box::new(Expr::Number(NumberValue::new_integer(
             BigInt::from_str(value).unwrap(),
-            false,
+            ExplicitSign::None,
         ))))
     }
 
