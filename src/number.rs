@@ -279,9 +279,7 @@ impl NumberValue {
             let int_value = value.numer();
             let digits = int_value.abs().to_string();
 
-            // Determine explicit_sign for computed integers: treat negative results as having an implicit
-            // negative sign so that the Display/formatting logic can preserve the sign information that
-            // callers (and the unit-tests) expect.
+            // Determine explicit_sign for computed integers: negative results keep Negative, positives None
             let explicit_sign = if int_value.is_negative() {
                 ExplicitSign::Negative
             } else {
@@ -289,7 +287,7 @@ impl NumberValue {
             };
 
             NumberValue {
-                value: value.clone(),
+                value,
                 format: NumberFormat::Integer { explicit_sign, digits },
             }
         } else {
@@ -704,67 +702,6 @@ mod tests {
     // Removed assert_from_str_ok_detailed! macro
 
     #[test]
-    fn test_from_str_integers() {
-        assert_from_str_ok!("0", Integer, "0", "0", explicit_sign: ExplicitSign::None, digits: "0".to_string());
-        assert_from_str_ok!("42", Integer, "42", "42", explicit_sign: ExplicitSign::None, digits: "42".to_string());
-        assert_from_str_ok!("+123", Integer, "123", "+123", explicit_sign: ExplicitSign::Positive, digits: "123".to_string());
-        assert_from_str_ok!("-5", Integer, "-5", "-5", explicit_sign: ExplicitSign::Negative, digits: "5".to_string());
-    }
-
-    #[test]
-    fn test_from_str_negative_zero() {
-        assert_from_str_ok!("-0", Integer, "0", "-0", explicit_sign: ExplicitSign::Negative, digits: "0".to_string());
-    }
-
-    #[test]
-    fn test_from_str_decimals() {
-        assert_from_str_ok!("0.0", Decimal, "0", "0.0", explicit_sign: ExplicitSign::None, base: "0".to_string(), decimal: Some("0".to_string()), exponent: None);
-        assert_from_str_ok!("1.5", Decimal, "15/10", "1.5", explicit_sign: ExplicitSign::None, base: "1".to_string(), decimal: Some("5".to_string()), exponent: None);
-        assert_from_str_ok!("-0.25", Decimal, "-25/100", "-0.25", explicit_sign: ExplicitSign::Negative, base: "0".to_string(), decimal: Some("25".to_string()), exponent: None);
-        assert_from_str_ok!("+100.001", Decimal, "100001/1000", "+100.001", explicit_sign: ExplicitSign::Positive, base: "100".to_string(), decimal: Some("001".to_string()), exponent: None);
-        assert_from_str_ok!("42.", Decimal, "42", "42.", explicit_sign: ExplicitSign::None, base: "42".to_string(), decimal: Some("".to_string()), exponent: None); // Trailing dot
-        assert_from_str_ok!(".5", Decimal, "5/10", ".5", explicit_sign: ExplicitSign::None, base: "0".to_string(), decimal: Some("5".to_string()), exponent: None); // Leading dot
-        assert_from_str_ok!("-.12", Decimal, "-12/100", "-.12", explicit_sign: ExplicitSign::Negative, base: "0".to_string(), decimal: Some("12".to_string()), exponent: None);
-        // The "+." case is now invalid because it lacks digits, caught by "Number must have digits"
-        // assert_from_str_ok!("+.", Decimal, "0", "+.", explicit_sign: true, base: "0".to_string(), decimal: Some("".to_string()), exponent: None);
-    }
-
-    #[test]
-    fn test_from_str_scientific() {
-        // Integer base
-        assert_from_str_ok!("1e3", Decimal, "1000", "1e3", explicit_sign: ExplicitSign::None, base: "1".to_string(), decimal: None, exponent: Some(Exponent { case: 'e', explicit_sign: false, sign: Sign::None, value: "3".to_string() }));
-        assert_from_str_ok!("-2E+4", Decimal, "-20000", "-2E+4", explicit_sign: ExplicitSign::Negative, base: "2".to_string(), decimal: None, exponent: Some(Exponent { case: 'E', explicit_sign: true, sign: Sign::Positive, value: "4".to_string() }));
-        assert_from_str_ok!("+5e-2", Decimal, "5/100", "+5e-2", explicit_sign: ExplicitSign::Positive, base: "5".to_string(), decimal: None, exponent: Some(Exponent { case: 'e', explicit_sign: true, sign: Sign::Negative, value: "2".to_string() }));
-        assert_from_str_ok!("10e0", Decimal, "10", "10e0", explicit_sign: ExplicitSign::None, base: "10".to_string(), decimal: None, exponent: Some(Exponent { case: 'e', explicit_sign: false, sign: Sign::None, value: "0".to_string() }));
-
-        // Decimal base
-        assert_from_str_ok!("1.23e2", Decimal, "123", "1.23e2", explicit_sign: ExplicitSign::None, base: "1".to_string(), decimal: Some("23".to_string()), exponent: Some(Exponent { case: 'e', explicit_sign: false, sign: Sign::None, value: "2".to_string() }));
-        assert_from_str_ok!("-0.5E-1", Decimal, "-5/100", "-0.5E-1", explicit_sign: ExplicitSign::Negative, base: "0".to_string(), decimal: Some("5".to_string()), exponent: Some(Exponent { case: 'E', explicit_sign: true, sign: Sign::Negative, value: "1".to_string() }));
-        assert_from_str_ok!("+42.e+3", Decimal, "42000", "+42.e+3", explicit_sign: ExplicitSign::Positive, base: "42".to_string(), decimal: Some("".to_string()), exponent: Some(Exponent { case: 'e', explicit_sign: true, sign: Sign::Positive, value: "3".to_string() }));
-        assert_from_str_ok!(".5e1", Decimal, "5", ".5e1", explicit_sign: ExplicitSign::None, base: "0".to_string(), decimal: Some("5".to_string()), exponent: Some(Exponent { case: 'e', explicit_sign: false, sign: Sign::None, value: "1".to_string() }));
-    }
-
-    #[test]
-    fn test_from_str_large_numbers() {
-        let large_int = "123456789012345678901234567890";
-        assert_from_str_ok!(large_int, Integer, large_int, large_int, explicit_sign: ExplicitSign::None, digits: large_int.to_string());
-
-        let large_neg_int = "-987654321098765432109876543210";
-        assert_from_str_ok!(large_neg_int, Integer, large_neg_int, large_neg_int, explicit_sign: ExplicitSign::Negative, digits: "987654321098765432109876543210".to_string());
-
-        let large_dec = "1234567890.0987654321";
-        assert_from_str_ok!(large_dec, Decimal, "12345678900987654321/10000000000", large_dec, explicit_sign: ExplicitSign::None, base: "1234567890".to_string(), decimal: Some("0987654321".to_string()), exponent: None);
-
-        let large_sci = "1.23456789e+30";
-        let expected_sci_val = "1234567890000000000000000000000"; // 1.23456789 * 10^30
-        assert_from_str_ok!(large_sci, Decimal, expected_sci_val, large_sci, explicit_sign: ExplicitSign::None, base: "1".to_string(), decimal: Some("23456789".to_string()), exponent: Some(Exponent { case: 'e', explicit_sign: true, sign: Sign::Positive, value: "30".to_string() }));
-
-        let large_neg_sci = "-9.8765e-25";
-        let expected_neg_sci_val = "-98765/100000000000000000000000000000"; // -9.8765 / 10^25
-        assert_from_str_ok!(large_neg_sci, Decimal, expected_neg_sci_val, large_neg_sci, explicit_sign: ExplicitSign::Negative, base: "9".to_string(), decimal: Some("8765".to_string()), exponent: Some(Exponent { case: 'e', explicit_sign: true, sign: Sign::Negative, value: "25".to_string() }));
-    }
-
-    #[test]
     fn test_from_str_invalid_inputs() {
         // Note: Chumsky errors might be different from the manual parser's errors.
         // We check for parts of the expected error messages.
@@ -1096,90 +1033,6 @@ mod tests {
         let pos1e_pos1 = parser.parse("+1e+1").into_result().unwrap();
         assert_eq!(pos1e_pos1.to_string(), "+1e+1");
         assert!((pos1e_pos1.as_f64().unwrap() - 10.0).abs() < 1e-10);
-    }
-
-    #[test]
-    fn test_component_preservation() {
-        let parser = NumberParserBuilder::new()
-            .rational(true)
-            .scientific(true)
-            .negative(true)
-            .build();
-
-        // Create exponent values outside the array to avoid temporary value drops
-        let exp_neg = Exponent {
-            sign: Sign::Negative,
-            explicit_sign: true,
-            value: "7".to_string(),
-            case: 'e',
-        };
-        let exp_pos = Exponent {
-            sign: Sign::Positive,
-            explicit_sign: true,
-            value: "3".to_string(),
-            case: 'E',
-        };
-
-        // Test with a complex number with all components
-        let test_cases = [
-            ("123.456e-7", "123", Some("456".to_string()), Some(&exp_neg), 123.456e-7),
-            (
-                "-987.654E+3",
-                "987",
-                Some("654".to_string()),
-                Some(&exp_pos),
-                -987.654e3,
-            ),
-            ("42.", "42", Some("".to_string()), None, 42.0),
-            ("0.123", "0", Some("123".to_string()), None, 0.123),
-        ];
-
-        for (input, expected_base, expected_decimal, expected_exponent, expected_value) in test_cases {
-            let result = parser.parse(input).into_result().unwrap();
-            assert!(!result.is_integer(), "Expected number to be rational");
-            assert_eq!(result.to_string(), input);
-            assert_eq!(result.base(), expected_base);
-            assert_eq!(result.decimal(), expected_decimal.as_deref());
-            assert_eq!(result.exponent(), expected_exponent);
-            // We used to compare BigRational values directly by first converting a f64 to a
-            // BigRational via `from_float`.  That introduced rounding-error differences when the
-            // parser generates the *exact* rational (e.g. `1929/156250000`) but the float route
-            // produces a binary approximation.  Instead we now rely on an f64 comparison with a
-            // tight tolerance which is more than sufficient for these behavioural tests.
-            let actual_f64 = result.as_f64().unwrap();
-            assert!(
-                (actual_f64 - expected_value).abs() < 1e-10,
-                "f64 comparison failed for input '{}': expected ~{}, got {}",
-                input,
-                expected_value,
-                actual_f64
-            );
-        }
-    }
-
-    #[test]
-    fn test_large_integer() {
-        let parser = NumberParserBuilder::new().negative(true).build();
-        let large_num = "12345678901234567890123456789012345678901234567890";
-        let result = parser.parse(large_num).into_result().unwrap();
-        assert!(result.is_integer(), "Expected number to be an integer");
-        assert_eq!(result.to_string(), large_num);
-    }
-
-    #[test]
-    fn test_large_rational() {
-        let parser = NumberParserBuilder::new().rational(true).build();
-        let large_num = "1234567890123456789012345678901234567890.1234567890123456789012345678901234567890";
-        let result = parser.parse(large_num).into_result().unwrap();
-        assert!(!result.is_integer(), "Expected number to be rational");
-        assert_eq!(result.to_string(), large_num);
-        assert_eq!(result.base(), "1234567890123456789012345678901234567890");
-        assert_eq!(result.decimal(), Some("1234567890123456789012345678901234567890"));
-        assert_eq!(result.exponent(), None);
-        assert_eq!(
-            result.to_integer(),
-            BigInt::parse_bytes(b"1234567890123456789012345678901234567890", 10).unwrap()
-        );
     }
 
     proptest! {

@@ -51,7 +51,7 @@ mac-setup:
     fi
 
 update-deps:
-    cargo update
+    cargo +nightly -Z unstable-options update --breaking
 
 # =============================================================================
 # Rust Development Tasks

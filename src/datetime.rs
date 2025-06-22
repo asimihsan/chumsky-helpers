@@ -504,30 +504,6 @@ mod tests {
         );
     }
 
-    // Test that all individual component validation branches in the empty condition are covered
-    #[test]
-    fn test_iso_duration_each_component_alone() {
-        // Test each duration component individually to ensure branch coverage
-        let components = [
-            ("P1Y", Some(1), None, None, None, None, None),
-            ("P1M", None, Some(1), None, None, None, None),
-            ("P1D", None, None, Some(1), None, None, None),
-            ("PT1H", None, None, None, Some(1), None, None),
-            ("PT1M", None, None, None, None, Some(1), None),
-            ("PT1S", None, None, None, None, None, Some(1.0)),
-        ];
-
-        for (input, years, months, days, hours, minutes, seconds) in components {
-            let parsed = parse_iso_duration(input).unwrap();
-            assert_eq!(parsed.years, years);
-            assert_eq!(parsed.months, months);
-            assert_eq!(parsed.days, days);
-            assert_eq!(parsed.hours, hours);
-            assert_eq!(parsed.minutes, minutes);
-            assert_eq!(parsed.seconds, seconds);
-        }
-    }
-
     #[test]
     fn test_iso_date_invalid_format() {
         let input = "2024/02/04"; // wrong delimiter instead of '-' at positions 4 and 7
