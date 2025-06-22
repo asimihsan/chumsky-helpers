@@ -1,0 +1,37 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Project Overview & Build Guide
+
+This repository is a Rust crate that bundles a collection of **crate-agnostic Chumsky helper parsers**.
+
+## Public API surface
+
+The crate's root file is @src/lib.rs.  It re-exports the main sub-modules, so when you need to jump to an implementation you can open one of the following single-file modules directly:
+
+| Feature area | Source file |
+| ----------- | ----------- |
+| Number parsing (integers, rationals, scientific) | @src/number.rs |
+| ISO-8601 dates & durations | @src/datetime.rs |
+| String & raw-string literals | @src/literal.rs |
+| Expression evaluation helpers | @src/expr.rs, @src/eval.rs |
+
+Each module is **self-contained** (one file per module) with its own tests at the bottom of the file and extra property tests under `tests/`.
+
+## Build / Test commands
+
+All common workflows are wrapped in the project @Justfile:
+
+* `just rust-dev` – format, apply clippy fixes, then run the full nextest suite.
+* `just rust-test` – execute the test suite once (same as legacy alias `just test`).
+* `just rust-watch` – watch for file changes and run `cargo check` & tests automatically.
+* `just cov-html` – generate an HTML coverage report via @scripts/cov.sh and open it in the browser.
+* `just rust-check-all` – run *fmt*, *clippy*, *nextest*, coverage (CI mode) and dependency audit in one go.
+
+These commands rely on standard Cargo invocations, so jumping into `scripts/cov.sh` or the relevant `cargo llvm-cov` command lines can clarify low-level details if needed.
+
+---
+
+Keeping this high-level map handy should make it faster to navigate the codebase and locate the right module or build helper.
