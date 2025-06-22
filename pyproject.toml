@@ -1,0 +1,15 @@
+[project]
+name = "chumsky-helpers"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "basedpyright>=1.29.4",
+    "pytest>=8.4.1",
+    "ruff>=0.12.0",
+    "ruff-lsp>=0.0.62",
+]

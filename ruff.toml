@@ -1,0 +1,6 @@
+line-length = 120
+preview = true
+
+[lint]
+select = ["E", "F", "W", "Q", "I"]
+fixable = ["ALL"]

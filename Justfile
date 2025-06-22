@@ -20,6 +20,9 @@ setup:
         just mac-setup
     fi
 
+    uv venv
+    uv sync
+
     rustup toolchain install nightly
     rustup target add wasm32-wasip1
     rustup component add llvm-tools-preview
@@ -202,3 +205,31 @@ cov-local:
     else
         cargo llvm-cov nextest --no-fail-fast --text --show-missing-lines --mcdc
     fi
+
+# =============================================================================
+# Iterative Coverage Helpers (local development)
+# =============================================================================
+
+# Build & run full test-suite once, producing raw coverage data but **no** report.
+cov-warm:
+    bash scripts/cov.sh warm
+
+# Re-print line coverage for a single file. Example:
+#   just cov-file src/lib.rs
+cov-file file:
+    bash scripts/cov.sh file {{file}}
+
+# Generate HTML coverage for a single file and open it in the browser.
+cov-file-html file:
+    bash scripts/cov.sh file-html {{file}}
+
+# Re-print coverage for all .rs files under a directory path.
+cov-dir dir:
+    bash scripts/cov.sh dir {{dir}}
+
+# Full HTML coverage report (opens browser).
+cov-html:
+    bash scripts/cov.sh html
+
+cov-json-file file:
+    bash scripts/cov.sh json-file {{file}}
