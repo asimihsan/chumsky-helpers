@@ -6,12 +6,16 @@ license = "MPL-2.0"
 
 [dependencies]
 ariadne = "0.5.1"
-chumsky = { version = "1.0.0-alpha.8", default-features = false, features = [
-    "extension",
+chumsky = { version = "0.10.1", default-features = false, features = [
+    "bytes",
+    "either",
+    "lexical-numbers",
     "memoization",
     "pratt",
+    "regex",
+    "serde",
+    "stacker",
     "std",
-    "sync",
 ] }
 num = "0.4.3"
 num-bigint = "0.4.6"

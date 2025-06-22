@@ -80,9 +80,7 @@ impl Evaluate for Expr {
 
                 // Check if the right value is an integer
                 if !right_val.is_integer() {
-                    return Err(Error::EvaluationError(
-                        "Exponent must be an integer".to_string(),
-                    ));
+                    return Err(Error::EvaluationError("Exponent must be an integer".to_string()));
                 }
 
                 let exponent = right_val.to_integer();
@@ -249,10 +247,7 @@ mod tests {
         let expr = parse(&format!("{}*{}", large_num1, large_num2)).unwrap();
         let result = expr.evaluate().unwrap();
         assert!(result.is_integer(), "Expected integer result");
-        assert_eq!(
-            result.to_string(),
-            "1219326311370217952237463801111263526900"
-        );
+        assert_eq!(result.to_string(), "1219326311370217952237463801111263526900");
     }
 
     #[test]

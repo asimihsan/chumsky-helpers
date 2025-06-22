@@ -146,14 +146,18 @@ impl LiteralParserBuilder {
             )))
             .map(|s: &str| s.to_string());
 
-        let dq_content =
-            choice((normal_dq, escaped_dq)).repeated().collect::<Vec<String>>().map(|v| v.concat());
+        let dq_content = choice((normal_dq, escaped_dq))
+            .repeated()
+            .collect::<Vec<String>>()
+            .map(|v| v.concat());
 
         let double_quoted = just("\"")
             .ignore_then(dq_content)
-            .then_ignore(just('"').or_not().try_map(|opt_quote, span| {
-                opt_quote.ok_or_else(|| Rich::custom(span, "Unclosed double quote"))
-            }))
+            .then_ignore(
+                just('"')
+                    .or_not()
+                    .try_map(|opt_quote, span| opt_quote.ok_or_else(|| Rich::custom(span, "Unclosed double quote"))),
+            )
             .map_with(|s, e| Expr::LiteralStr((s, e.span())));
 
         // Raw string parser
@@ -192,10 +196,7 @@ impl LiteralParserBuilder {
                 if self.allow_single_quote {
                     Expr::LiteralStr((s, e.span()))
                 } else {
-                    Expr::Error((
-                        "single-quoted string literals are not allowed".to_string(),
-                        e.span(),
-                    ))
+                    Expr::Error(("single-quoted string literals are not allowed".to_string(), e.span()))
                 }
             });
 
@@ -230,10 +231,7 @@ mod tests {
     fn test_number_literal() {
         let parser = LiteralParserBuilder::new().build();
         let input = "42";
-        let expected = Expr::LiteralNum((
-            NumberValue::new_integer(42, ExplicitSign::None),
-            (0..2).into(),
-        ));
+        let expected = Expr::LiteralNum((NumberValue::new_integer(42, ExplicitSign::None), (0..2).into()));
         assert_eq!(parser.parse(input).into_result(), Ok(expected));
     }
 
@@ -448,23 +446,11 @@ mod tests {
         let test_cases = [
             (
                 "42",
-                Expr::LiteralNum((
-                    NumberValue::new_integer(42, ExplicitSign::None),
-                    (0..2).into(),
-                )),
+                Expr::LiteralNum((NumberValue::new_integer(42, ExplicitSign::None), (0..2).into())),
             ),
-            (
-                r#""double""#,
-                Expr::LiteralStr(("double".to_string(), (0..8).into())),
-            ),
-            (
-                r#"'single'"#,
-                Expr::LiteralStr(("single".to_string(), (0..8).into())),
-            ),
-            (
-                r#"`raw`"#,
-                Expr::LiteralStr(("raw".to_string(), (0..5).into())),
-            ),
+            (r#""double""#, Expr::LiteralStr(("double".to_string(), (0..8).into()))),
+            (r#"'single'"#, Expr::LiteralStr(("single".to_string(), (0..8).into()))),
+            (r#"`raw`"#, Expr::LiteralStr(("raw".to_string(), (0..5).into()))),
         ];
 
         for (input, expected) in test_cases {
