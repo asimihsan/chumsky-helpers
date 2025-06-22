@@ -78,10 +78,6 @@ backend = "core:node"
 version = "10.11.1"
 backend = "aqua:pnpm/pnpm"
 
-[tools.pre-commit]
-version = "4.1.0"
-backend = "aqua:pre-commit/pre-commit"
-
 [tools.python]
 version = "3.12.11"
 backend = "core:python"

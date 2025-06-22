@@ -28,8 +28,6 @@ setup:
     rustup component add llvm-tools-preview
     rustup component add rustfmt
     rustup component add clippy
-    pre-commit install
-    pre-commit install-hooks
 
 mac-setup:
     #!/usr/bin/env bash
@@ -125,7 +123,7 @@ rust-build-release:
 rust-clean:
     cargo clean
 
-# Run all Rust checks (use in CI and pre-commit)
+# Run all Rust checks
 rust-check-all: rust-check-format rust-check-clippy rust-test rust-coverage-ci rust-audit
 
 # =============================================================================
