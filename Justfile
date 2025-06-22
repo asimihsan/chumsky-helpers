@@ -28,6 +28,7 @@ setup:
     rustup component add llvm-tools-preview
     rustup component add rustfmt
     rustup component add clippy
+    rustup component add miri rust-src --toolchain nightly
 
 mac-setup:
     #!/usr/bin/env bash
@@ -45,7 +46,7 @@ mac-setup:
 
     brew install libiconv llvm
     rustup component add llvm-tools-preview
-    rustup component add llvm-tools-preview --toolchain nightly-aarch64-apple-darwin
+    rustup component add llvm-tools-preview --toolchain nightly
     if ! xcode-select -p >/dev/null 2>&1; then
         xcode-select --install
         sudo xcode-select --switch /Library/Developer/CommandLineTools
