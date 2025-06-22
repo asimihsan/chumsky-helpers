@@ -224,3 +224,6 @@ cython_debug/
 .cursorindexingignore
 
 docs/
+
+.cursor/*
+!.cursor/environment.json
