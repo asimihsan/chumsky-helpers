@@ -275,10 +275,7 @@ pub fn iso_duration_parser<'a>() -> impl Parser<'a, &'a str, IsoDuration, extra:
                 && minutes.is_none()
                 && seconds.is_none()
             {
-                Ok(Err(Rich::custom(
-                    span,
-                    "Expected at least one duration component after 'P'",
-                ))?)
+                Err(Rich::custom(span, "Expected at least one duration component after 'P'"))
             } else {
                 Ok(IsoDuration {
                     years,
@@ -371,7 +368,7 @@ pub fn go_duration_parser<'a>() -> impl Parser<'a, &'a str, GoDuration, extra::E
 /// assert_eq!(date.month(), time::Month::February);
 /// assert_eq!(date.day(), 4);
 /// ```
-pub fn parse_iso_date(input: &str) -> ParseResult<Date, Rich<char>> {
+pub fn parse_iso_date(input: &str) -> ParseResult<Date, Rich<'_, char>> {
     iso_date_parser().parse(input)
 }
 
@@ -403,7 +400,7 @@ pub fn parse_iso_date(input: &str) -> ParseResult<Date, Rich<char>> {
 /// assert_eq!(duration.minutes, None);
 /// assert_eq!(duration.seconds, None);
 /// ```
-pub fn parse_iso_duration(input: &str) -> ParseResult<IsoDuration, Rich<char>> {
+pub fn parse_iso_duration(input: &str) -> ParseResult<IsoDuration, Rich<'_, char>> {
     iso_duration_parser().parse(input)
 }
 
@@ -428,7 +425,7 @@ pub fn parse_iso_duration(input: &str) -> ParseResult<IsoDuration, Rich<char>> {
 /// let expected = (1.5 * 3600.0 * 1_000_000_000.0) as i64;
 /// assert_eq!(duration.nanos, expected);
 /// ```
-pub fn parse_go_duration(input: &str) -> ParseResult<GoDuration, Rich<char>> {
+pub fn parse_go_duration(input: &str) -> ParseResult<GoDuration, Rich<'_, char>> {
     go_duration_parser().parse(input)
 }
 
