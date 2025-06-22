@@ -1,0 +1,288 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Bon Builder Patterns
+
+**Goal**: Self-documenting configuration through builders instead of `new()` with unnamed parameters.
+
+## **Rules**
+
+### **1. When to Use Builders**
+- **Any configuration struct** (no exceptions)
+- **3+ parameters in any constructor**
+- **Validation needed at build time**
+
+### **2. Standard Builder Setup**
+
+```rust
+#[derive(Debug, Clone, bon::Builder)]
+#[builder(derive(Debug, Into), on(Float32, into))]
+pub struct ConfigStruct {
+    pub required_field: String,
+    #[builder(default = true)]
+    pub optional_field: bool,
+}
+```
+
+**Always include:**
+- `#[builder(derive(Debug, Into))]` - enables `.into()` instead of `.build()`
+- `#[builder(on(Float32, into))]` - automatic conversion for Float32 fields
+- `#[builder(default = value)]` for optional fields
+
+### **3. Automatic Boxing for Trait Objects**
+
+For fields that need `Box<dyn Trait>`, use `#[builder(with = ...)]` to avoid explicit `Box::new`:
+
+```rust
+#[derive(Builder)]
+#[builder(derive(Into))]
+pub struct EvolutionEngine<G: Genome, F: Fitness> {
+    pub breeding_pipeline: BreedingPipeline<G, F>,
+    
+    // Automatic boxing - no Box::new needed in usage!
+    #[builder(with = |strategy: impl ReplacementStrategy<G, F> + 'static| {
+        Box::new(strategy)
+    })]
+    pub replacement_strategy: Box<dyn ReplacementStrategy<G, F>>,
+}
+
+// Usage is clean and ergonomic:
+let engine: EvolutionEngine<MyGenome, MyFitness> = EvolutionEngine::builder()
+    .breeding_pipeline(pipeline)
+    .replacement_strategy(GenerationalReplacement::new())  // No Box::new!
+    .into();
+```
+
+**Why `#[builder(with = ...)]` over global `From` implementations:**
+- **Avoids trait coherence conflicts** - no risk of conflicting with `impl<T> From<T> for T`
+- **More explicit** - conversion logic is visible at the field level
+- **Type-safe** - `impl Trait + 'static` ensures only valid types can be passed
+- **Zero runtime cost** - boxing happens at construction time
+
+### **4. Validation Pattern**
+
+```rust
+#[derive(Debug, Clone, bon::Builder)]
+#[builder(derive(Debug, Into))]
+pub struct SteadyStateReplacement {
+    #[builder(with = |size: usize| -> Result<_, String> {
+        if size == 0 {
+            Err("Tournament size must be greater than 0".to_string())
+        } else {
+            Ok(size)
+        }
+    })]
+    replacement_tournament_size: usize,
+}
+
+// Usage requires .unwrap() when validation can fail:
+let replacement: SteadyStateReplacement = SteadyStateReplacement::builder()
+    .replacement_tournament_size(3)
+    .unwrap()  // Handle validation Result
+    .into();   // Convert to struct
+```
+
+### **5. Documentation Pattern**
+
+```rust
+/// Configuration for X.
+///
+/// # Example
+///
+/// ```rust
+/// use crate::ConfigStruct;
+///
+/// let config: ConfigStruct = ConfigStruct::builder()
+///     .required_field("value")
+///     .optional_field(false)
+///     .into();
+/// ```
+```
+
+### **6. Usage Patterns**
+
+**Simple case (no validation):**
+```rust
+let config: MyConfig = MyConfig::builder()
+    .field1(value1)
+    .field2(value2)
+    .into();
+```
+
+**With validation:**
+```rust
+let config: MyConfig = MyConfig::builder()
+    .validated_field(value)
+    .unwrap()  // Handle validation error
+    .into();
+```
+
+**With Float32 auto-conversion:**
+```rust
+let hook: TarpeianHook = TarpeianHook::builder()
+    .kill_probability(0.5)    // f64 -> Float32 automatic
+    .size_threshold_factor(2.0)
+    .min_population_size(50)
+    .into();
+```
+
+**With automatic trait object boxing:**
+```rust
+let engine: EvolutionEngine<MyGenome, MyFitness> = EvolutionEngine::builder()
+    .breeding_pipeline(pipeline)
+    .replacement_strategy(GenerationalReplacement::new())  // Auto-boxed!
+    .into();
+```
+
+## **Anti-Patterns**
+
+### **DON'T: Manual `.into()` calls**
+```rust
+// ❌ Before: Manual conversions
+let hook: TarpeianHook = TarpeianHook::builder()
+    .kill_probability(0.5.into())  // Manual
+    .size_threshold_factor(2.0.into())
+    .into();
+
+// ✅ After: Auto-conversion with on(Float32, into)
+let hook: TarpeianHook = TarpeianHook::builder()
+    .kill_probability(0.5)     // Automatic
+    .size_threshold_factor(2.0)
+    .into();
+```
+
+### **DON'T: Manual `Box::new` calls**
+```rust
+// ❌ Before: Manual boxing
+let engine: EvolutionEngine<MyGenome, MyFitness> = EvolutionEngine::builder()
+    .breeding_pipeline(pipeline)
+    .replacement_strategy(Box::new(GenerationalReplacement::new()))  // Verbose
+    .into();
+
+// ✅ After: Automatic boxing with #[builder(with = ...)]
+let engine: EvolutionEngine<MyGenome, MyFitness> = EvolutionEngine::builder()
+    .breeding_pipeline(pipeline)
+    .replacement_strategy(GenerationalReplacement::new())  // Clean!
+    .into();
+```
+
+### **DON'T: `new()` for configuration**
+```rust
+// ❌ Hard to understand what parameters mean
+let hook = TarpeianHook::new(0.5, 2.0, 50);
+
+// ✅ Self-documenting
+let hook: TarpeianHook = TarpeianHook::builder()
+    .kill_probability(0.5)
+    .size_threshold_factor(2.0)
+    .min_population_size(50)
+    .into();
+```
+
+### **DON'T: Missing type annotations with complex generics**
+```rust
+// ❌ Type inference fails
+let engine = EvolutionEngine::builder()
+    .breeding_pipeline(pipeline)
+    .replacement_strategy(strategy)
+    .into();  // Compiler can't infer G, F
+
+// ✅ Explicit type annotation
+let engine: EvolutionEngine<MyGenome, MyFitness> = EvolutionEngine::builder()
+    .breeding_pipeline(pipeline)
+    .replacement_strategy(strategy)
+    .into();
+```
+
+### **DON'T: Global `From` implementations for trait objects**
+```rust
+// ❌ Can cause coherence conflicts
+impl<T, G: Genome, F: Fitness> From<T> for Box<dyn ReplacementStrategy<G, F>>
+where
+    T: ReplacementStrategy<G, F> + 'static,
+{
+    fn from(strategy: T) -> Self {
+        Box::new(strategy)
+    }
+}
+
+// ✅ Use field-specific #[builder(with = ...)] instead
+#[builder(with = |strategy: impl ReplacementStrategy<G, F> + 'static| {
+    Box::new(strategy)
+})]
+pub replacement_strategy: Box<dyn ReplacementStrategy<G, F>>,
+```
+
+## **Testing Pattern**
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_config_creation() {
+        let config: MyConfig = MyConfig::builder()
+            .required_field("test")
+            .optional_field(true)
+            .into();
+        
+        assert_eq!(config.required_field, "test");
+        assert!(config.optional_field);
+    }
+
+    #[test]
+    fn test_validation() {
+        let result = MyConfig::builder()
+            .invalid_field(0)  // Should fail validation
+            .unwrap_err();     // Expect error
+        
+        assert!(result.contains("must be greater than 0"));
+    }
+
+    #[test]
+    fn test_automatic_boxing() {
+        let engine: EvolutionEngine<MyGenome, MyFitness> = EvolutionEngine::builder()
+            .breeding_pipeline(pipeline)
+            .replacement_strategy(GenerationalReplacement::new())  // No Box::new needed
+            .into();
+        
+        // Verify the engine was built correctly
+        assert_eq!(engine.generation, 0);
+    }
+}
+```
+
+## **Migration Checklist**
+
+When adding builders to existing structs:
+
+1. Add `#[derive(bon::Builder)]` and derives
+2. Add `#[builder(on(Float32, into))]` for Float32 fields  
+3. Add `#[builder(default = value)]` for optional fields
+4. Add validation with `#[builder(with = |...|)]` if needed
+5. **For trait objects**: Use `#[builder(with = |concrete: impl Trait + 'static| { Box::new(concrete) })]`
+6. Update documentation with example
+7. Update all usage sites to use builder
+8. Add tests for builder pattern
+9. **Keep existing `new()` for backward compatibility**
+
+## **Common Patterns Summary**
+
+| Field Type | Pattern | Example |
+|------------|---------|---------|
+| **Primitive types** | Direct assignment | `pub field: String` |
+| **Float32 fields** | `#[builder(on(Float32, into))]` | Auto-converts `f64` → `Float32` |
+| **Optional fields** | `#[builder(default = value)]` | Provides sensible defaults |
+| **Validated fields** | `#[builder(with = \|v\| -> Result<_, _>)]` | Returns `Result` for validation |
+| **Trait objects** | `#[builder(with = \|concrete: impl Trait\| Box::new(concrete))]` | Auto-boxes concrete types |
+
+## **Performance Notes**
+
+- Builders compile to zero-cost abstractions
+- `Into` conversions happen at compile time
+- Validation happens at build time, not runtime
+- Automatic boxing happens at construction time
+- No performance overhead vs manual construction

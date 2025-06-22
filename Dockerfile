@@ -14,6 +14,7 @@ RUN apt-get update \
         ca-certificates \
         curl \
         git \
+        less \
         pkg-config \
         sudo \
         vim \
