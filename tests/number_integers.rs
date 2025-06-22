@@ -1,3 +1,4 @@
+use bon::Builder;
 use chumsky::Parser;
 use chumsky_helpers::number::{ExplicitSign, NumberParserBuilder};
 use num_bigint::BigInt;
@@ -5,18 +6,25 @@ use rstest::rstest;
 mod common;
 use common::assert_display_sign;
 
+#[derive(Debug, Builder)]
+struct IntegerCase {
+    input: &'static str,
+    expected: i64,
+    sign: ExplicitSign,
+}
+
 #[rstest]
-#[case("0", 0, ExplicitSign::None)]
-#[case("42", 42, ExplicitSign::None)]
-#[case("+123", 123, ExplicitSign::Positive)]
-#[case("-5", -5, ExplicitSign::Negative)]
-#[case("-0", 0, ExplicitSign::Negative)]
-fn parses_integers(#[case] input: &str, #[case] expected: i64, #[case] sign: ExplicitSign) {
+#[case(IntegerCase::builder().input("0").expected(0).sign(ExplicitSign::None).build())]
+#[case(IntegerCase::builder().input("42").expected(42).sign(ExplicitSign::None).build())]
+#[case(IntegerCase::builder().input("+123").expected(123).sign(ExplicitSign::Positive).build())]
+#[case(IntegerCase::builder().input("-5").expected(-5).sign(ExplicitSign::Negative).build())]
+#[case(IntegerCase::builder().input("-0").expected(0).sign(ExplicitSign::Negative).build())]
+fn parses_integers(#[case] c: IntegerCase) {
     let parser = NumberParserBuilder::new().negative(true).build();
-    let parsed = parser.parse(input).into_result().expect("parse failure");
+    let parsed = parser.parse(c.input).into_result().expect("parse failure");
 
     // Then
-    assert_eq!(parsed.to_integer(), BigInt::from(expected));
-    assert_eq!(parsed.to_string(), input);
-    assert_display_sign(&parsed.to_string(), sign);
+    assert_eq!(parsed.to_integer(), BigInt::from(c.expected));
+    assert_eq!(parsed.to_string(), c.input);
+    assert_display_sign(&parsed.to_string(), c.sign);
 }

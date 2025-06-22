@@ -1,7 +1,8 @@
+use bon::Builder;
 use chumsky_helpers::datetime::parse_iso_duration;
 use rstest::rstest;
 
-#[derive(Debug)]
+#[derive(Debug, Builder)]
 struct IsoCase {
     input: &'static str,
     years: Option<i32>,
@@ -12,82 +13,13 @@ struct IsoCase {
     seconds: Option<f64>,
 }
 
-impl IsoCase {
-    const fn y(input: &'static str, y: i32) -> Self {
-        Self {
-            input,
-            years: Some(y),
-            months: None,
-            days: None,
-            hours: None,
-            minutes: None,
-            seconds: None,
-        }
-    }
-    const fn m(input: &'static str, m: i32) -> Self {
-        Self {
-            input,
-            years: None,
-            months: Some(m),
-            days: None,
-            hours: None,
-            minutes: None,
-            seconds: None,
-        }
-    }
-    const fn d(input: &'static str, d: i32) -> Self {
-        Self {
-            input,
-            years: None,
-            months: None,
-            days: Some(d),
-            hours: None,
-            minutes: None,
-            seconds: None,
-        }
-    }
-    const fn h(input: &'static str, h: i32) -> Self {
-        Self {
-            input,
-            years: None,
-            months: None,
-            days: None,
-            hours: Some(h),
-            minutes: None,
-            seconds: None,
-        }
-    }
-    const fn min(input: &'static str, m: i32) -> Self {
-        Self {
-            input,
-            years: None,
-            months: None,
-            days: None,
-            hours: None,
-            minutes: Some(m),
-            seconds: None,
-        }
-    }
-    const fn s(input: &'static str, s: f64) -> Self {
-        Self {
-            input,
-            years: None,
-            months: None,
-            days: None,
-            hours: None,
-            minutes: None,
-            seconds: Some(s),
-        }
-    }
-}
-
 #[rstest]
-#[case(IsoCase::y("P1Y", 1))]
-#[case(IsoCase::m("P1M", 1))]
-#[case(IsoCase::d("P1D", 1))]
-#[case(IsoCase::h("PT1H", 1))]
-#[case(IsoCase::min("PT1M", 1))]
-#[case(IsoCase::s("PT1S", 1.0))]
+#[case(IsoCase::builder().input("P1Y").years(1).build())]
+#[case(IsoCase::builder().input("P1M").months(1).build())]
+#[case(IsoCase::builder().input("P1D").days(1).build())]
+#[case(IsoCase::builder().input("PT1H").hours(1).build())]
+#[case(IsoCase::builder().input("PT1M").minutes(1).build())]
+#[case(IsoCase::builder().input("PT1S").seconds(1.0).build())]
 fn iso_duration_single_component(#[case] c: IsoCase) {
     let parsed = parse_iso_duration(c.input).unwrap();
     assert_eq!(parsed.years, c.years);
