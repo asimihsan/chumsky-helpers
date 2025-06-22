@@ -70,6 +70,9 @@ backend = "aqua:jqlang/jq"
 version = "0.30.0"
 backend = "aqua:jj-vcs/jj"
 
+[tools.jujutsu.checksums]
+"jj-v0.30.0-x86_64-unknown-linux-musl.tar.gz" = "sha256:5540b5438d71867ccde3339d041e57eecf60edf8b4ecc3dfcce2af106e08f70b"
+
 [tools.just]
 version = "1.40.0"
 backend = "ubi:casey/just"
