@@ -59,7 +59,7 @@ update-deps:
 # =============================================================================
 
 # Development workflow
-rust-dev: rust-format rust-clippy-fix rust-test
+rust-dev: rust-format rust-clippy-fix rust-test-all
 
 # Watching for changes
 rust-watch:
@@ -78,6 +78,8 @@ rust-check-clippy:
 
 rust-clippy-fix:
     cargo clippy --all-targets --all-features --fix --allow-dirty -- -D warnings
+
+rust-test-all: rust-test rust-test-doc rust-test-miri
 
 # Testing
 rust-test:
@@ -124,7 +126,7 @@ rust-clean:
     cargo clean
 
 # Run all Rust checks
-rust-check-all: rust-check-format rust-check-clippy rust-test rust-coverage-ci rust-audit
+rust-check-all: rust-check-format rust-check-clippy rust-test-all rust-coverage-ci rust-audit
 
 # =============================================================================
 # Cross-Language Tasks (All Languages)

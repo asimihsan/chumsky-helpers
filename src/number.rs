@@ -27,7 +27,7 @@
 //! Basic parsing of integers:
 //!
 //! ```
-//! use chumsky_helpers::number::{NumberParserBuilder, NumberValue};
+//! use chumsky_helpers::number::{NumberParserBuilder, NumberValue, ExplicitSign};
 //! use chumsky::prelude::*;
 //! use num_bigint::BigInt;
 //!
@@ -35,7 +35,7 @@
 //!     .negative(true)
 //!     .build();
 //!
-//! let expected = NumberValue::new_integer(42, false);
+//! let expected = NumberValue::new_integer(42, ExplicitSign::None);
 //! assert_eq!(parser.parse("42").into_result(), Ok(expected));
 //! ```
 //!
