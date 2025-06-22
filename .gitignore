@@ -25,7 +25,9 @@ Cargo.lock
 .aider*
 vendor
 
-coverage.json# Byte-compiled / optimized / DLL files
+coverage.json
+
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
