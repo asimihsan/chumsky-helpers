@@ -66,6 +66,10 @@ backend = "aqua:golangci/golangci-lint"
 version = "1.8.0"
 backend = "aqua:jqlang/jq"
 
+[tools.jujutsu]
+version = "0.30.0"
+backend = "aqua:jj-vcs/jj"
+
 [tools.just]
 version = "1.40.0"
 backend = "ubi:casey/just"

@@ -16,6 +16,7 @@ RUN apt-get update \
         git \
         pkg-config \
         sudo \
+        vim \
     && rm -rf /var/lib/apt/lists/*
 
 # -----------------------------------------------------------------------------

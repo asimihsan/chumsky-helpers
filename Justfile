@@ -79,7 +79,7 @@ rust-check-clippy:
 rust-clippy-fix:
     cargo clippy --all-targets --all-features --fix --allow-dirty -- -D warnings
 
-rust-test-all: rust-test rust-test-doc rust-test-miri
+rust-test-all: rust-test rust-test-doc
 
 # Testing
 rust-test:
@@ -88,9 +88,8 @@ rust-test:
 rust-test-doc:
     cargo test --doc
 
-# Miri testing (only on marked tests to avoid long wall-clock hits)
 rust-test-miri:
-    RUSTFLAGS="-Zmiri-strict-provenance" cargo +nightly miri test -- --ignored
+    MIRIFLAGS="-Zmiri-strict-provenance -Zmiri-symbolic-alignment-check" PROPTEST_DISABLE_FAILURE_PERSISTENCE=1 cargo +nightly miri test
 
 # Coverage
 rust-coverage:

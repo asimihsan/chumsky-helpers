@@ -26,6 +26,8 @@ python = "prefix:3.12"
 rust = "prefix:1.87"
 uv = "latest"
 
+jujutsu = "latest"
+
 [env]
 COREPACK_ENABLE_DOWNLOAD_PROMPT = "1"
 LIBRARY_PATH = "$LIBRARY_PATH:/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib:/opt/homebrew/opt/libiconv/lib"
