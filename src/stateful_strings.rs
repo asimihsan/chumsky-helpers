@@ -78,6 +78,8 @@
 //! [`chumsky`]: https://docs.rs/chumsky
 //! [`Rich`]: chumsky::error::Rich
 
+use chumsky::input::Input;
+use chumsky::input::{Checkpoint, Cursor};
 use chumsky::{error::Rich, extra, prelude::*};
 
 /// Parser-local state that higher-level helpers can choose to carry around.
@@ -105,6 +107,7 @@ pub type StrExtra<'src, Ctx> = extra::Full<Rich<'src, char>, StrState, Ctx>;
 /// Convenience alias for the raw-string helper where the *context* is the opening
 /// `hash_cnt`.
 pub type RawExtra<'src> = StrExtra<'src, usize>;
+
 /// Convenience alias for helpers that don't need an extra *context*.
 pub type SimpleExtra<'src> = StrExtra<'src, ()>;
 
@@ -131,10 +134,14 @@ pub fn raw_string<'src, const MULTI: bool>() -> impl Parser<'src, &'src str, &'s
 
     // Number of `#` characters, captured as *context* **and** stored in parser-local
     // state so that higher-level helpers (e.g. `interpolated_string`) can reuse it.
-    let hashes = just('#').repeated().at_most(MAX_HASHES).count().map_with(|cnt, extra| {
-        extra.state().hash_cnt = cnt;
-        cnt
-    });
+    let hashes = just::<_, _, RawExtra<'src>>('#')
+        .repeated()
+        .at_most(MAX_HASHES)
+        .count()
+        .map_with(|cnt: usize, extra| {
+            extra.state().hash_cnt = cnt;
+            cnt
+        });
 
     // Helper so that we have `"` vs `"""` in one place only.
     let quote: &'static str = if MULTI { "\"\"\"" } else { "\"" };
@@ -159,7 +166,21 @@ pub fn raw_string<'src, const MULTI: bool>() -> impl Parser<'src, &'src str, &'s
 
     // Feed the `hash_cnt` we captured in `start` as *context* to the `body.then_ignore(end)`
     // parser so that `end` can enforce the correct number of `#` characters.
-    start.ignore_with_ctx(body.then_ignore(end))
+    start.ignore_with_ctx(body.then_ignore(end)).map(|s: &'src str| {
+        if MULTI {
+            // For multi-line raw strings, strip any trailing spaces or tabs that
+            // immediately precede the closing delimiter while *retaining* the
+            // final newline. This matches Swift/Pkl behaviour where the closing
+            // triple-quote must appear on its own line.
+            if let Some(idx) = s.rfind('\n') {
+                &s[..=idx]
+            } else {
+                s
+            }
+        } else {
+            s
+        }
+    })
 }
 
 /// Cooked (escaped) string literal parser.
@@ -190,6 +211,7 @@ pub fn cooked_string<'src>() -> impl Parser<'src, &'src str, String, SimpleExtra
 pub enum Segment<'src> {
     /// Plain text slice.
     Text(&'src str),
+    
     /// An expression captured between the interpolation markers.  For the sake of this
     /// helper we treat the expression as an uninterpreted slice – the *caller* is free
     /// to feed that back into their higher-level expression parser.
@@ -216,12 +238,12 @@ pub fn interpolated_string<'src>() -> impl Parser<'src, &'src str, Vec<Segment<'
             .to_slice()
             .map(Segment::Text);
 
-        // We need to know how many `#`s this string was opened with.  For now we hard-code
+        // TODO we need to know how many `#`s this string was opened with.  For now we hard-code
         // zero which matches the majority of languages except Pkl raw strings and Swift
         // raw-&-interpolated.
         let interp_start = just("\\#(");
 
-        // Inside an interpolation we naively consume **until the matching parenthesis**.  A
+        // TODO inside an interpolation we naively consume **until the matching parenthesis**.  A
         // real implementation would invoke the full *expression* parser.
         let expr = interp_start
             .ignore_then(
@@ -238,8 +260,25 @@ pub fn interpolated_string<'src>() -> impl Parser<'src, &'src str, Vec<Segment<'
                 .repeated()
                 .to_slice(),
             )
+            .then_ignore(just(')'))
             .map(Segment::Expr);
 
         choice((text, expr)).repeated().collect::<Vec<_>>()
     })
+}
+
+impl<'src, I> chumsky::inspector::Inspector<'src, I> for StrState
+where
+    I: Input<'src>,
+{
+    type Checkpoint = ();
+
+    #[inline(always)]
+    fn on_token(&mut self, _token: &I::Token) {}
+
+    #[inline(always)]
+    fn on_save<'parse>(&self, _cursor: &Cursor<'src, 'parse, I>) -> Self::Checkpoint {}
+
+    #[inline(always)]
+    fn on_rewind<'parse>(&mut self, _marker: &Checkpoint<'src, 'parse, I, Self::Checkpoint>) {}
 }
