@@ -94,13 +94,19 @@ pub struct StrState {
     pub paren_lvl: usize,
 }
 
-/// An alias for the extra type used by [`raw_string`].  We keep the default *state* and
-/// *error* types but opt-in to a **context** (`usize`) so the hash-count computed from the
-/// opening delimiter can flow into the closing-delimiter parser.
+/// Common *extra* type used by all helpers in this module.
 ///
-/// You almost never need to reference this type directly; it shows up only in doctest
-/// signatures.
-pub type RawExtra<'src> = extra::Full<Rich<'src, char>, (), usize>;
+/// * **Error** — we always stick to [`Rich`].
+/// * **State** — [`StrState`] so different helpers can share delimiter / nesting info.
+/// * **Context** — parameterised per-helper.  For raw strings we carry the `hash_cnt`, for
+///   cooked / interpolated strings we default to `()`.
+pub type StrExtra<'src, Ctx> = extra::Full<Rich<'src, char>, StrState, Ctx>;
+
+/// Convenience alias for the raw-string helper where the *context* is the opening
+/// `hash_cnt`.
+pub type RawExtra<'src> = StrExtra<'src, usize>;
+/// Convenience alias for helpers that don't need an extra *context*.
+pub type SimpleExtra<'src> = StrExtra<'src, ()>;
 
 /// Hash-delimited raw string literal parser.
 ///
@@ -120,10 +126,15 @@ pub type RawExtra<'src> = extra::Full<Rich<'src, char>, (), usize>;
 /// See the module-level examples for usage.
 #[allow(clippy::module_name_repetitions)]
 pub fn raw_string<'src, const MULTI: bool>() -> impl Parser<'src, &'src str, &'src str, RawExtra<'src>> {
-    // Number of `#` characters, captured as context so that the end-parser knows what to
-    // expect.  We *also* allow zero hashes which degrades to the familiar `"…"` /
-    // `"""…"""` Rust/Swift syntax.
-    let hashes = just('#').repeated().count();
+    // Guard against pathological delimiters (Swift caps at 255).
+    const MAX_HASHES: usize = 255;
+
+    // Number of `#` characters, captured as *context* **and** stored in parser-local
+    // state so that higher-level helpers (e.g. `interpolated_string`) can reuse it.
+    let hashes = just('#').repeated().at_most(MAX_HASHES).count().map_with(|cnt, extra| {
+        extra.state().hash_cnt = cnt;
+        cnt
+    });
 
     // Helper so that we have `"` vs `"""` in one place only.
     let quote: &'static str = if MULTI { "\"\"\"" } else { "\"" };
@@ -157,7 +168,7 @@ pub fn raw_string<'src, const MULTI: bool>() -> impl Parser<'src, &'src str, &'s
 /// sequences are interpreted and the resulting **owned** [`String`] is returned.
 /// For brevity the implemented escape set is the one shared by Rust, JavaScript, and Pkl
 /// (`\n`, `\r`, `\t`, `\\`, `\"`).
-pub fn cooked_string<'src>() -> impl Parser<'src, &'src str, String, extra::Err<Rich<'src, char>>> {
+pub fn cooked_string<'src>() -> impl Parser<'src, &'src str, String, SimpleExtra<'src>> {
     let normal_char = any().filter(|c: &char| *c != '\\' && *c != '"');
 
     // Classic escape sequences → single *char* output.
@@ -195,7 +206,7 @@ pub enum Segment<'src> {
 /// The helper is good enough for doctests and simple use-cases but should not be considered
 /// production-ready yet – better recovery and brace-/hash-parameterisation are tracked in
 /// `docs/more-chumsky-helpers-checklist.md`.
-pub fn interpolated_string<'src>() -> impl Parser<'src, &'src str, Vec<Segment<'src>>, extra::Err<Rich<'src, char>>> {
+pub fn interpolated_string<'src>() -> impl Parser<'src, &'src str, Vec<Segment<'src>>, SimpleExtra<'src>> {
     recursive(|_string| {
         // Anything up to, but not including, a backslash that *might* start an interpolation.
         let text = any()
