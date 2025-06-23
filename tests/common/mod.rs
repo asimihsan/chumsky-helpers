@@ -25,7 +25,9 @@ pub fn assert_display_sign(display: &str, expected_sign: ExplicitSign) {
 macro_rules! assert_parses_to {
     ($parser:expr, $src:expr, $want:expr $(,)?) => {{
         let got = $parser.parse($src).into_result().expect("parse error");
-        assert_eq!(got, $want, "on input {:?}", $src);
+        use std::borrow::Borrow;
+        let got_str: &str = got.borrow();
+        assert_eq!(got_str, $want, "on input {:?}", $src);
     }};
 }
 

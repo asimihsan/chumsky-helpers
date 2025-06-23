@@ -1,6 +1,7 @@
 use chumsky::Parser;
 mod common;
 
+use chumsky_helpers::stateful_strings::Lang;
 use chumsky_helpers::stateful_strings::{Segment, StringParserConfig};
 // (indoc not currently used; left in dev-dependencies for future multi-line test cases)
 
@@ -25,6 +26,16 @@ fn raw_missing_closing_delimiter_is_error() {
 fn raw_multi_line_indent_preserved_for_now() {
     let src = "#\"\"\"\n    foo\n    bar\n    \"\"\"#";
     let cfg = StringParserConfig::default();
+    assert_parses_to!(cfg.raw_multi_line(), src, "\nfoo\nbar\n");
+}
+
+#[test]
+fn raw_multi_line_no_strip_indent() {
+    let src = "#\"\"\"\n    foo\n    bar\n    \"\"\"#";
+    let cfg = StringParserConfig::builder()
+        .lang(Lang::Rust)
+        .strip_indent(false)
+        .build();
     assert_parses_to!(cfg.raw_multi_line(), src, "\n    foo\n    bar\n");
 }
 

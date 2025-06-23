@@ -434,8 +434,16 @@ impl StringParserConfig {
     }
 
     /// Multi-line raw string parser according to this configuration.
-    pub fn raw_multi_line<'src>(&self) -> impl Parser<'src, &'src str, &'src str, RawExtra<'src>> {
-        raw_string_impl::<true>()
+    pub fn raw_multi_line<'src>(&self) -> impl Parser<'src, &'src str, String, RawExtra<'src>> {
+        let strip = self.strip_indent;
+        raw_string_impl::<true>().map(move |s: &'src str| {
+            if strip {
+                // Strip indentation following Swift/Pkl rules.
+                strip_multiline_indent(s)
+            } else {
+                s.to_string()
+            }
+        })
     }
 
     /// Cooked (escaped) string literal parser according to this configuration.
@@ -453,6 +461,48 @@ impl Default for StringParserConfig {
     fn default() -> Self {
         Self::builder().build()
     }
+}
+
+/// Utility that strips the common indentation from a multi-line raw string body.
+/// Assumes the string starts with a newline and ends with a newline (as ensured
+/// by `raw_string_impl::<true>`).  Tabs are treated as one indentation unit.
+fn strip_multiline_indent(s: &str) -> String {
+    // Split but preserve newline at start; the first slice will be empty.
+    let mut lines: Vec<&str> = s.split('\n').collect();
+    if lines.is_empty() {
+        return String::new();
+    }
+
+    // Last element after split corresponds to text after final newline (empty).
+    if lines.last() == Some(&"") {
+        lines.pop();
+    }
+
+    // Compute minimal indent (spaces or tabs) across non-empty lines ignoring the first empty slice.
+    let min_indent = lines
+        .iter()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| line.chars().take_while(|c| *c == ' ' || *c == '\t').count())
+        .min()
+        .unwrap_or(0);
+
+    // Reconstruct string with first newline and stripped indentation.
+    let mut out = String::with_capacity(s.len());
+    out.push('\n');
+    for (idx, line) in lines.iter().enumerate() {
+        if idx == 0 {
+            // first slice was empty, already emitted newline.
+            continue;
+        }
+        let trimmed = if line.len() >= min_indent {
+            &line[min_indent..]
+        } else {
+            ""
+        };
+        out.push_str(trimmed);
+        out.push('\n');
+    }
+    out
 }
 
 // Placeholder: later we will attach `into_parser()` style helpers here.
