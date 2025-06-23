@@ -78,6 +78,7 @@
 //! [`chumsky`]: https://docs.rs/chumsky
 //! [`Rich`]: chumsky::error::Rich
 
+use crate::esc;
 use bon::bon;
 use chumsky::input::Input;
 use chumsky::input::{Checkpoint, Cursor};
@@ -270,15 +271,7 @@ fn raw_string_impl<'src, const MULTI: bool>() -> impl Parser<'src, &'src str, &'
 /// (`\n`, `\r`, `\t`, `\\`, `\"`).
 pub fn cooked_string<'src>() -> impl Parser<'src, &'src str, String, SimpleExtra<'src>> {
     let normal_char = any().filter(|c: &char| *c != '\\' && *c != '"');
-
-    // Classic escape sequences → single *char* output.
-    let escape_char = just('\\').ignore_then(choice((
-        just('n').to('\n'),
-        just('r').to('\r'),
-        just('t').to('\t'),
-        just('"').to('"'),
-        just('\\').to('\\'),
-    )));
+    let escape_char = esc::char_escape(0);
 
     let body = choice((escape_char, normal_char)).repeated().collect::<String>();
 

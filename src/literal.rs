@@ -60,6 +60,7 @@
 //! }
 //! ```
 
+use crate::esc;
 use crate::number::{NumberParserBuilder, NumberValue};
 use crate::Spanned;
 use chumsky::{error::Rich, prelude::*};
@@ -135,16 +136,7 @@ impl LiteralParserBuilder {
 
         // Double-quoted strings with span
         let normal_dq = none_of("\\\"").map(|c: char| c.to_string());
-        let escaped_dq = just("\\")
-            .ignore_then(choice((
-                just("\\").to("\\"),
-                just("/").to("/"),
-                just("\"").to("\""),
-                just("n").to("\n"),
-                just("r").to("\r"),
-                just("t").to("\t"),
-            )))
-            .map(|s: &str| s.to_string());
+        let escaped_dq = esc::char_escape_err(0).map(|c: char| c.to_string());
 
         let dq_content = choice((normal_dq, escaped_dq))
             .repeated()
@@ -177,15 +169,7 @@ impl LiteralParserBuilder {
             .ignore_then(
                 choice((
                     none_of("\\'").map(|c: char| c.to_string()),
-                    just("\\")
-                        .ignore_then(choice((
-                            just("\\").to("\\"),
-                            just("'").to("'"),
-                            just("n").to("\n"),
-                            just("r").to("\r"),
-                            just("t").to("\t"),
-                        )))
-                        .map(|s: &str| s.to_string()),
+                    esc::char_escape_err(0).map(|c: char| c.to_string()),
                 ))
                 .repeated()
                 .collect::<Vec<_>>()

@@ -1,6 +1,6 @@
 # Chumsky Helper Roadmap & Checklist
 
-> A living checklist that tracks what is needed to graduate our ad-hoc notes in docs/more-chumsky-helpers.md into a production-ready, **crate-agnostic** set of Chumsky parsers.  The list is ordered by dependency, so completing an item unblocks those below it.
+> A living checklist that tracks what is needed.  The list is ordered by dependency, so completing an item unblocks those below it.
 
 ---
 
@@ -16,6 +16,31 @@
 > 2. Unit tests (happy & edge cases).
 > 3. Property-based tests (proptest) that stress invalid inputs & recovery.
 > 4. A public builder (see §Configuration) to tweak language-specific knobs.
+
+---
+
+## Pkl String Support – Refactor & Implementation Plan
+
+> Tracking the phased roadmap (2025-06-23) that will make the string helpers fully compliant with the Pkl specification without code duplication.
+
+| Phase | Status | Deliverable |
+| ----- | ------ | ----------- |
+| 0 | [ ] | Extract a shared `esc` module with `char_escape` & `unicode_escape` parsers; refactor `literal.rs`, `cooked_string`, and tests to reuse it |
+| 1 | [ ] | Implement `cooked_multi_line` helper (triple-quote) + indent strip; expose via `StringParserConfig::cooked_multi_line()` and enable for `Lang::Pkl` / `Lang::Swift` |
+| 2 | [ ] | Make interpolation hash-aware: consult `StrState.hash_cnt`, support both `\#(` and future brace variants, and add nested-interpolation handling |
+| 3 | [ ] | Full Unicode escape set (`\0`, `\xNN`, `\uNNNN`, `\u{…}`) with ≥0x10FFFF rejection & `unicode_escape` flag wiring |
+| 4 | [ ] | Add `StringParserConfig::dial(Lang::Pkl)` preset turning on `strip_indent`, `allow_interpolation`, and `unicode_escape` |
+| 5 | [ ] | Delegate `LiteralParserBuilder` double-quoted branch to the new `cooked_string()` helper so escapes live in one place |
+
+### Test Additions
+
+- Unit tests
+  - `"\u{26}"` ⇒ `"&"` (single-line cooked)
+  - Multi-line cooked with varying indentation (examples from Pkl docs)
+  - Custom delimiter with 2 hashes & escape/interp: `##" \\#\#n \#(1 + 1) "##`
+- Property tests
+  - Round-trip guarantee for random Unicode strings with `n ∈ 0..=3` hashes (raw & cooked)
+  - No-panic invariant for arbitrary `Vec<u8>` across all helpers
 
 ---
 
