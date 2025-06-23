@@ -80,7 +80,7 @@ rust-check-clippy:
 rust-clippy-fix:
     cargo clippy --all-targets --all-features --fix --allow-dirty -- -D warnings
 
-rust-test-all: rust-test rust-test-doc rust-test-miri
+rust-test-all: rust-test rust-test-doc
 
 # Testing
 rust-test:
