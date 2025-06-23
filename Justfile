@@ -80,7 +80,7 @@ rust-check-clippy:
 rust-clippy-fix:
     cargo clippy --all-targets --all-features --fix --allow-dirty -- -D warnings
 
-rust-test-all: rust-test rust-test-doc
+rust-test-all: rust-test rust-test-doc rust-snap-test
 
 # Testing
 rust-test:
@@ -236,3 +236,13 @@ cov-html:
 
 cov-json-file file:
     bash scripts/cov.sh json-file {{file}}
+
+# Rust Development Tasks
+rust-snap-test:
+    cargo insta test --all-features
+
+rust-snap-review:
+    cargo insta review
+
+rust-snap-test-review:
+    cargo insta test --review

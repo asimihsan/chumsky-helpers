@@ -1,0 +1,12 @@
+---
+source: tests/stateful_strings_cooked.rs
+assertion_line: 25
+expression: parsed
+input_file: tests/fixtures/stateful_strings/cooked_multi/02_hash_prefix.txt
+---
+ParseResult {
+    output: Some(
+        "\nworld\n",
+    ),
+    errs: [],
+}

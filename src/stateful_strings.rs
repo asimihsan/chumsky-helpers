@@ -339,6 +339,59 @@ pub fn interpolated_string<'src>() -> impl Parser<'src, &'src str, Vec<Segment<'
     })
 }
 
+/// Hash-aware cooked multi-line string parser.
+///
+/// This helper parses triple-quoted cooked strings with hash delimiters, supporting
+/// escape sequences and optional indentation stripping. Examples:
+/// - `"""hello\nworld"""` (no hashes)
+/// - `#"""hello\nworld"""#` (one hash)
+/// - `##"""hello\nworld"""##` (two hashes)
+///
+/// Unlike raw strings, escape sequences like `\n`, `\t`, etc. are interpreted.
+/// The hash count affects both the delimiter and the escape prefix (e.g., `\#n` for one hash).
+pub fn cooked_multi_line<'src>() -> impl Parser<'src, &'src str, String, RawExtra<'src>> {
+    cooked_multi_line_impl()
+}
+
+fn cooked_multi_line_impl<'src>() -> impl Parser<'src, &'src str, String, RawExtra<'src>> {
+    // Guard against pathological delimiters (Swift caps at 255).
+    const MAX_HASHES: usize = 255;
+
+    let hashes = just::<_, _, RawExtra<'src>>('#')
+        .repeated()
+        .at_most(MAX_HASHES)
+        .count()
+        .map_with(|cnt: usize, extra| {
+            extra.state().hash_cnt = cnt;
+            cnt
+        });
+
+    // Opening delimiter: <hashes> + """
+    let quote = "\"\"\"";
+    let start = hashes.then_ignore(just(quote));
+
+    // Closing delimiter: """ + <exactly same number of hashes>
+    let end = just(quote)
+        .then(
+            just('#')
+                .repeated()
+                .configure(|cfg, hash_cnt: &usize| cfg.exactly(*hash_cnt)),
+        )
+        .ignored();
+
+    // Body: parse until we see `end`. Escapes are interpreted (hash_cnt=0 for now).
+    let body = {
+        let escape_char = esc::char_escape::<RawExtra<'src>>(0);
+        let normal_char = any().filter(|c: &char| *c != '\\');
+        choice((escape_char, normal_char))
+            .and_is(end.not())
+            .repeated()
+            .collect::<String>()
+    };
+
+    start.ignore_with_ctx(body.then_ignore(end))
+}
+
 impl<'src, I> chumsky::inspector::Inspector<'src, I> for StrState
 where
     I: Input<'src>,
@@ -442,6 +495,22 @@ impl StringParserConfig {
     /// Cooked (escaped) string literal parser according to this configuration.
     pub fn cooked_string<'src>(&self) -> impl Parser<'src, &'src str, String, SimpleExtra<'src>> {
         cooked_string()
+    }
+
+    /// Cooked multi-line string parser according to this configuration.
+    ///
+    /// Parses hash-delimited triple-quoted strings with escape sequence interpretation
+    /// and optional indentation stripping (for Swift/Pkl compatibility).
+    pub fn cooked_multi_line<'src>(&self) -> impl Parser<'src, &'src str, String, RawExtra<'src>> {
+        let strip = self.strip_indent;
+        cooked_multi_line_impl().map(move |s: String| {
+            if strip {
+                // Strip indentation following Swift/Pkl rules.
+                strip_multiline_indent(&s)
+            } else {
+                s
+            }
+        })
     }
 
     /// Interpolated string parser according to this configuration.

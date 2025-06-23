@@ -26,10 +26,15 @@ time = "0.3.41"
 bon = "3.6"
 
 [dev-dependencies]
+indoc = "2.0"
+insta = { version = "1.43.1", features = ["glob", "ron", "yaml"] }
 proptest = "1.6"
 rstest = "0.25"
 test-case = "3.3.1"
-indoc = "2.0"
 
 [lib]
 path = "src/lib.rs"
+
+[profile.dev.package]
+insta.opt-level = 3
+similar.opt-level = 3

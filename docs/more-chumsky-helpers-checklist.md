@@ -25,7 +25,7 @@
 
 | Phase | Status | Deliverable |
 | ----- | ------ | ----------- |
-| 0 | [ ] | Extract a shared `esc` module with `char_escape` & `unicode_escape` parsers; refactor `literal.rs`, `cooked_string`, and tests to reuse it |
+| 0 | [x] | Extract a shared `esc` module with `char_escape` & `unicode_escape` parsers; refactor `literal.rs`, `cooked_string`, and tests to reuse it |
 | 1 | [ ] | Implement `cooked_multi_line` helper (triple-quote) + indent strip; expose via `StringParserConfig::cooked_multi_line()` and enable for `Lang::Pkl` / `Lang::Swift` |
 | 2 | [ ] | Make interpolation hash-aware: consult `StrState.hash_cnt`, support both `\#(` and future brace variants, and add nested-interpolation handling |
 | 3 | [ ] | Full Unicode escape set (`\0`, `\xNN`, `\uNNNN`, `\u{…}`) with ≥0x10FFFF rejection & `unicode_escape` flag wiring |
