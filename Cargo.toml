@@ -29,6 +29,7 @@ bon = "3.6"
 proptest = "1.6"
 rstest = "0.25"
 test-case = "3.3.1"
+indoc = "2.0"
 
 [lib]
 path = "src/lib.rs"

@@ -361,3 +361,75 @@ where
     #[inline(always)]
     fn on_rewind<'parse>(&mut self, _marker: &Checkpoint<'src, 'parse, I, Self::Checkpoint>) {}
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Lang {
+    /// Swift-style defaults.
+    #[default]
+    Swift,
+    /// Pkl language defaults.
+    Pkl,
+    /// C# 11 raw-string dialect.
+    CSharp11,
+    /// Kotlin experimental multi-dollar strings.
+    Kotlin,
+    /// Rust raw & cooked strings (no interpolation by default).
+    Rust,
+    /// Python triple-quote and r"…" literals (no interpolation).
+    Python,
+}
+
+/// High-level configuration builder that can cover all string helper variants.
+/// ⤷ In this first scaffold it merely records the requested toggles; the next
+///   PRs will wire these into the actual parser combinators.
+#[derive(Debug, Clone)]
+pub struct StringParserConfig {
+    /// Chosen language preset – fills the rest of the fields with sensible
+    /// defaults that callers can still override.
+    pub lang: Lang,
+
+    /// Whether multi-line raw strings should strip the common indentation that
+    /// precedes the closing delimiter.  Swift & Pkl do, Rust does not.
+    pub strip_indent: bool,
+
+    /// Enable `\u{…}` and friends in *cooked* literals.
+    pub unicode_escape: bool,
+
+    /// Enable `\#(` … interpolation support.
+    pub allow_interpolation: bool,
+}
+
+// Generate a typestate builder via `bon` so callers can fluently tweak knobs.
+#[bon]
+impl StringParserConfig {
+    #[builder]
+    pub fn new(
+        #[builder(default = Lang::Swift)] lang: Lang,
+        #[builder(default)] strip_indent: bool,
+        #[builder(default)] unicode_escape: bool,
+        #[builder(default)] allow_interpolation: bool,
+    ) -> Self {
+        // Sensible defaults cascade from the chosen language.
+        let (strip_indent, unicode_escape, allow_interpolation) = if matches!(lang, Lang::Swift | Lang::Pkl) {
+            (
+                // both Swift & Pkl strip indent in multi-line mode
+                strip_indent || true,
+                // both allow unicode escapes
+                unicode_escape || true,
+                // both allow interpolation in cooked strings by default
+                allow_interpolation || true,
+            )
+        } else {
+            (strip_indent, unicode_escape, allow_interpolation)
+        };
+
+        Self {
+            lang,
+            strip_indent,
+            unicode_escape,
+            allow_interpolation,
+        }
+    }
+}
+
+// Placeholder: later we will attach `into_parser()` style helpers here.
