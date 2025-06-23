@@ -409,16 +409,12 @@ impl StringParserConfig {
         #[builder(default)] unicode_escape: bool,
         #[builder(default)] allow_interpolation: bool,
     ) -> Self {
-        // Sensible defaults cascade from the chosen language.
+        // Language presets override caller defaults unless the caller explicitly
+        // flips the boolean *after* dialling the language (the builder lets
+        // them do that). For now we assume the caller invokes the preset
+        // first, so we simply force the defaults here.
         let (strip_indent, unicode_escape, allow_interpolation) = if matches!(lang, Lang::Swift | Lang::Pkl) {
-            (
-                // both Swift & Pkl strip indent in multi-line mode
-                strip_indent || true,
-                // both allow unicode escapes
-                unicode_escape || true,
-                // both allow interpolation in cooked strings by default
-                allow_interpolation || true,
-            )
+            (true, true, true)
         } else {
             (strip_indent, unicode_escape, allow_interpolation)
         };
@@ -429,6 +425,33 @@ impl StringParserConfig {
             unicode_escape,
             allow_interpolation,
         }
+    }
+
+    /// Single-line raw string parser according to this configuration.
+    pub fn raw_single_line<'src>(&self) -> impl Parser<'src, &'src str, &'src str, RawExtra<'src>> {
+        // TODO integrate config flags (strip_indent, allow_interpolation, etc.)
+        raw_string_impl::<false>()
+    }
+
+    /// Multi-line raw string parser according to this configuration.
+    pub fn raw_multi_line<'src>(&self) -> impl Parser<'src, &'src str, &'src str, RawExtra<'src>> {
+        raw_string_impl::<true>()
+    }
+
+    /// Cooked (escaped) string literal parser according to this configuration.
+    pub fn cooked_string<'src>(&self) -> impl Parser<'src, &'src str, String, SimpleExtra<'src>> {
+        cooked_string()
+    }
+
+    /// Interpolated string parser according to this configuration.
+    pub fn interpolated_string<'src>(&self) -> impl Parser<'src, &'src str, Vec<Segment<'src>>, SimpleExtra<'src>> {
+        interpolated_string()
+    }
+}
+
+impl Default for StringParserConfig {
+    fn default() -> Self {
+        Self::builder().build()
     }
 }
 
