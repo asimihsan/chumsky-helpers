@@ -92,7 +92,7 @@ rust-test-doc:
 rust-test-miri:
     MIRIFLAGS="-Zmiri-strict-provenance -Zmiri-symbolic-alignment-check \
                       -Zmiri-env-set=PROPTEST_DISABLE_FAILURE_PERSISTENCE=1 \
-                      -Zmiri-env-set=PROPTEST_CASES=4" \
+                      -Zmiri-env-set=PROPTEST_CASES=8" \
     cargo +nightly miri nextest run --all-features --no-fail-fast
 
 # Coverage

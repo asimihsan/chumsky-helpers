@@ -37,10 +37,10 @@
 //!
 //! ```rust
 //! use chumsky::prelude::*;
-//! use chumsky_helpers::stateful_strings::raw_string;
+//! use chumsky_helpers::stateful_strings::raw_single_line;
 //!
 //! // Single-line raw string starting with two hashes.
-//! let parser = raw_string::<false>();
+//! let parser = raw_single_line();
 //! let input  = "##\"Hello, World!\"##";
 //! //                  ^ ^^^^^^^^^^^^^^^  ^^
 //! //                  | |      body     | |
@@ -55,10 +55,10 @@
 //!
 //! ```rust
 //! use chumsky::prelude::*;
-//! use chumsky_helpers::stateful_strings::raw_string;
+//! use chumsky_helpers::stateful_strings::raw_multi_line;
 //!
 //! // Multi-line raw string (triple quotes) with one leading hash.
-//! let parser = raw_string::<true>();
+//! let parser = raw_multi_line();
 //! let input = "#\"\"\"\nLine 1\nLine 2\n\"\"\"#";
 //! //  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ body ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 //! let inner = parser.parse(input).unwrap();
@@ -78,6 +78,7 @@
 //! [`chumsky`]: https://docs.rs/chumsky
 //! [`Rich`]: chumsky::error::Rich
 
+use bon::bon;
 use chumsky::input::Input;
 use chumsky::input::{Checkpoint, Cursor};
 use chumsky::{error::Rich, extra, prelude::*};
@@ -111,24 +112,100 @@ pub type RawExtra<'src> = StrExtra<'src, usize>;
 /// Convenience alias for helpers that don't need an extra *context*.
 pub type SimpleExtra<'src> = StrExtra<'src, ()>;
 
-/// Hash-delimited raw string literal parser.
+/// Which delimiter style should the raw string parser expect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RawStringMode {
+    /// A single `"` quote – e.g. `#"hello"#`.
+    #[default]
+    SingleLine,
+    /// Triple quotes `"""` – e.g. `#"""hello"""#`.
+    MultiLine,
+}
+
+/// User-facing configuration for the raw string helper.
 ///
-/// The const generic `MULTI` decides whether the delimiter uses a *single* double quote
-/// (`"`) (single-line) or *triple* double quotes (`"""`) (multi-line).  Both variants
-/// follow Swift/Pkl semantics:
+/// The API is intentionally kept *exhaustive-future-proof*: new fields can be
+/// added with `#[builder(default)]` without breaking callers that rely on the
+/// generated builder.
+#[derive(Debug, Clone, Copy)]
+pub struct RawStringConfig {
+    pub mode: RawStringMode,
+    /// Whether to strip indentation in multi-line mode (planned feature).
+    pub strip_indent: bool,
+    /// Whether to recognise `\#(` interpolations inside the string (future).
+    pub allow_interp: bool,
+}
+
+impl Default for RawStringConfig {
+    fn default() -> Self {
+        Self {
+            mode: RawStringMode::SingleLine,
+            strip_indent: false,
+            allow_interp: false,
+        }
+    }
+}
+
+// Generate a typestate builder via `bon`.
+#[bon]
+impl RawStringConfig {
+    #[builder]
+    pub fn new(
+        #[builder(default)] mode: RawStringMode,
+        #[builder(default)] strip_indent: bool,
+        #[builder(default)] allow_interp: bool,
+    ) -> Self {
+        Self {
+            mode,
+            strip_indent,
+            allow_interp,
+        }
+    }
+
+    /// Convert the configuration into an actual parser instance.
+    pub fn into_parser<'src>(&self) -> Box<dyn Parser<'src, &'src str, &'src str, RawExtra<'src>> + 'src> {
+        match self.mode {
+            RawStringMode::SingleLine => Box::new(raw_string_impl::<false>()),
+            RawStringMode::MultiLine => Box::new(raw_string_impl::<true>()),
+        }
+    }
+}
+
+/// Convenient free function that accepts a `RawStringConfig` and returns the
+/// corresponding parser.  This keeps call-sites concise:
 ///
-/// * The input must start with *zero or more* `#` characters, then the quote(s).
-/// * The input ends with the matching quote(s) **followed by the *same* number of `#`**.
-/// * The body is returned **as-is** – no escape processing or interpolation is performed.
+/// ```rust
+/// use chumsky_helpers::stateful_strings::{raw_string, RawStringConfig, RawStringMode};
+/// use chumsky::prelude::*;
 ///
-/// # Errors
+/// // Build a parser for multi-line raw strings using the builder.
+/// let parser = raw_string(
+///     RawStringConfig::builder()
+///         .mode(RawStringMode::MultiLine)
+///         .build(),
+/// );
 ///
-/// If the input ends before the closing delimiter, a [`Rich`] error is reported.
-///
-/// # Doctest
-/// See the module-level examples for usage.
+/// let input = "#\"\"\"\nHello\n\"\"\"#";
+/// let inner = parser.parse(input).unwrap();
+/// assert_eq!(inner.trim(), "Hello");
+/// ```
+pub fn raw_string<'src>(cfg: RawStringConfig) -> Box<dyn Parser<'src, &'src str, &'src str, RawExtra<'src>> + 'src> {
+    cfg.into_parser()
+}
+
+/// Convenience helper: single-line raw string parser without any configuration.
+pub fn raw_single_line<'src>() -> impl Parser<'src, &'src str, &'src str, RawExtra<'src>> {
+    raw_string_impl::<false>()
+}
+
+/// Convenience helper: multi-line raw string parser without any configuration.
+pub fn raw_multi_line<'src>() -> impl Parser<'src, &'src str, &'src str, RawExtra<'src>> {
+    raw_string_impl::<true>()
+}
+
+/// Internal implementation shared by the user-facing configuration API above.
 #[allow(clippy::module_name_repetitions)]
-pub fn raw_string<'src, const MULTI: bool>() -> impl Parser<'src, &'src str, &'src str, RawExtra<'src>> {
+fn raw_string_impl<'src, const MULTI: bool>() -> impl Parser<'src, &'src str, &'src str, RawExtra<'src>> {
     // Guard against pathological delimiters (Swift caps at 255).
     const MAX_HASHES: usize = 255;
 
@@ -166,21 +243,23 @@ pub fn raw_string<'src, const MULTI: bool>() -> impl Parser<'src, &'src str, &'s
 
     // Feed the `hash_cnt` we captured in `start` as *context* to the `body.then_ignore(end)`
     // parser so that `end` can enforce the correct number of `#` characters.
-    start.ignore_with_ctx(body.then_ignore(end)).map(|s: &'src str| {
-        if MULTI {
-            // For multi-line raw strings, strip any trailing spaces or tabs that
-            // immediately precede the closing delimiter while *retaining* the
-            // final newline. This matches Swift/Pkl behaviour where the closing
-            // triple-quote must appear on its own line.
-            if let Some(idx) = s.rfind('\n') {
-                &s[..=idx]
+    start
+        .ignore_with_ctx(body.then_ignore(end))
+        .map_with(|s: &'src str, _extra| {
+            if MULTI {
+                // For multi-line raw strings, strip any trailing spaces or tabs that
+                // immediately precede the closing delimiter while *retaining* the
+                // final newline. This matches Swift/Pkl behaviour where the closing
+                // triple-quote must appear on its own line.
+                if let Some(idx) = s.rfind('\n') {
+                    &s[..=idx]
+                } else {
+                    s
+                }
             } else {
                 s
             }
-        } else {
-            s
-        }
-    })
+        })
 }
 
 /// Cooked (escaped) string literal parser.
@@ -211,7 +290,7 @@ pub fn cooked_string<'src>() -> impl Parser<'src, &'src str, String, SimpleExtra
 pub enum Segment<'src> {
     /// Plain text slice.
     Text(&'src str),
-    
+
     /// An expression captured between the interpolation markers.  For the sake of this
     /// helper we treat the expression as an uninterpreted slice – the *caller* is free
     /// to feed that back into their higher-level expression parser.

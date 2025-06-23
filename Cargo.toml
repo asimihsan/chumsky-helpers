@@ -23,11 +23,11 @@ num-rational = "0.4.2"
 num-traits = "0.2.19"
 thiserror = "2.0.12"
 time = "0.3.41"
+bon = "3.6"
 
 [dev-dependencies]
 proptest = "1.6"
 rstest = "0.25"
-bon = "3.6"
 test-case = "3.3.1"
 
 [lib]
