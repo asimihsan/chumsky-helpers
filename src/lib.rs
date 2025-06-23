@@ -115,6 +115,7 @@ pub mod eval;
 pub mod expr;
 pub mod literal;
 pub mod number;
+pub mod stateful_strings;
 
 use chumsky::span::SimpleSpan;
 
